@@ -7,12 +7,13 @@ Use this when the React frontend stays on Cloudflare Pages and the Laravel API m
 - Project root: `frontend`
 - Build command: `npm run build`
 - Output directory: `dist`
+- If Cloudflare shows `/src/main.jsx` in the browser console, the Pages project is publishing the source folder instead of the Vite build output. Set the output directory to `dist` when the project root is `frontend`, or use the root `wrangler.toml` in this repository.
 - Environment variables:
 
 ```bash
-VITE_API_BASE_URL=https://api.your-cloudflare-domain.example
+VITE_API_BASE_URL=https://rescuelink-api.darryljohnnarvasa01.workers.dev
 VITE_REVERB_APP_KEY=rescuelink-key
-VITE_REVERB_HOST=api.your-cloudflare-domain.example
+VITE_REVERB_HOST=rescuelink-api.darryljohnnarvasa01.workers.dev
 VITE_REVERB_PORT=443
 VITE_REVERB_TLS=true
 ```
@@ -21,10 +22,10 @@ The frontend also loads `/config.js` before React starts. You can change the bac
 
 ```js
 window.__RESCUELINK_CONFIG__ = {
-  apiBaseUrl: 'https://api.your-cloudflare-domain.example',
+  apiBaseUrl: 'https://rescuelink-api.darryljohnnarvasa01.workers.dev',
   reverb: {
     appKey: 'rescuelink-key',
-    host: 'api.your-cloudflare-domain.example',
+    host: 'rescuelink-api.darryljohnnarvasa01.workers.dev',
     port: 443,
     wssPort: 443,
     tls: true,
@@ -36,7 +37,7 @@ Leave `apiBaseUrl` empty only when the API is served from the same origin as the
 
 ## Backend on a Laravel-capable host
 
-Cloudflare Pages does not run Laravel/PHP. Deploy `backend` to a PHP host, VPS, container host, or Laravel platform, then point a Cloudflare DNS record such as `api.your-cloudflare-domain.example` to that backend.
+Cloudflare Pages does not run Laravel/PHP. Deploy `backend` to a PHP host, VPS, container host, or Laravel platform, then point a Cloudflare DNS record such as `rescuelink-api.darryljohnnarvasa01.workers.dev` or your custom API hostname to that backend.
 
 Start from:
 
@@ -47,10 +48,10 @@ cp backend/.env.cloudflare-supabase.example backend/.env
 Set at minimum:
 
 ```bash
-APP_URL=https://api.your-cloudflare-domain.example
-FRONTEND_URL=https://your-cloudflare-domain.example
-CLOUDFLARE_FRONTEND_URL=https://your-cloudflare-domain.example
-CORS_ALLOWED_ORIGINS=https://your-cloudflare-domain.example
+APP_URL=https://rescuelink-api.darryljohnnarvasa01.workers.dev
+FRONTEND_URL=https://darrylres.darryljohnnarvasa01.workers.dev
+CLOUDFLARE_FRONTEND_URL=https://darrylres.darryljohnnarvasa01.workers.dev
+CORS_ALLOWED_ORIGINS=https://darrylres.darryljohnnarvasa01.workers.dev
 DB_HOST=aws-0-your-region.pooler.supabase.com
 DB_PORT=6543
 DB_DATABASE=postgres

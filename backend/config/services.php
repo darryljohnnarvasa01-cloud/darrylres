@@ -35,7 +35,7 @@ return [
         'url' => env('SUPABASE_URL') ?: (env('SUPABASE_STORAGE_PUBLIC_URL')
             ? preg_replace('#/storage/v1/object/public/.*$#', '', env('SUPABASE_STORAGE_PUBLIC_URL'))
             : null),
-        'anon_key' => env('SUPABASE_ANON_KEY') ?: env('SUPABASE_STORAGE_ACCESS_KEY_ID'),
+        'anon_key' => env('SUPABASE_ANON_KEY') ?: env('SUPABASE_KEY') ?: env('SUPABASE_STORAGE_ACCESS_KEY_ID'),
         'service_role_key' => env('SUPABASE_SERVICE_ROLE_KEY'),
     ],
 

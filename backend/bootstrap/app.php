@@ -24,6 +24,13 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append(ForceHttps::class);
+        $middleware->redirectGuestsTo(function (Request $request) {
+            if ($request->is('api/*') || $request->is('broadcasting/auth') || $request->expectsJson()) {
+                return null;
+            }
+
+            return (string) config('app.frontend_url', '/');
+        });
         $middleware->alias([
             'ability' => EnsureAbility::class,
             'role' => EnsureRole::class,
