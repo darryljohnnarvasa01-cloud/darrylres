@@ -30,7 +30,7 @@ Default seeded admin:
 This project uses the existing Laravel API with Supabase Postgres and optional Supabase Storage. It does not use Supabase Auth, so there are no auth redirects, hosted login screens, or session login walls.
 
 1. Create a Supabase project.
-2. Copy `backend/.env.supabase.example` to `backend/.env`.
+2. Copy `backend/.env.cloudflare-supabase.example` to `backend/.env` for production, or start from `backend/.env.example` for local-only testing.
 3. Fill in `DB_HOST`, `DB_PASSWORD`, `APP_URL`, `FRONTEND_URL`, and `CORS_ALLOWED_ORIGINS`.
 4. In Supabase Storage, create:
    - `incident-media` as a public bucket.
@@ -48,6 +48,14 @@ php artisan serve
 ```
 
 For local-only development, keep `DB_CONNECTION=sqlite`, `GOVERNMENT_ID_DISK=private`, and `INCIDENT_MEDIA_DISK=public`.
+
+## Cloudflare Domain Setup
+For production, the React frontend can stay on Cloudflare Pages while the Laravel backend moves behind a Cloudflare-managed API domain.
+
+- Frontend runtime API config: `frontend/public/config.js`
+- Frontend Cloudflare env example: `frontend/.env.cloudflare.example`
+- Backend Supabase/Cloudflare env example: `backend/.env.cloudflare-supabase.example`
+- Full deployment notes: `docs/cloudflare-supabase.md`
 
 ## Frontend Setup
 ```bash
