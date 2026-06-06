@@ -1,15 +1,33 @@
 import Echo from 'laravel-echo'
 import Pusher from 'pusher-js'
-import { API_BASE_URL } from './api'
+import { API_BASE_URL, getRuntimeConfig } from './api'
 
 let echoInstance = null
 
 function asBoolean(value, defaultValue = false) {
-  if (value === undefined) {
+  if (value === undefined || value === null || value === '') {
     return defaultValue
   }
 
   return String(value).toLowerCase() === 'true'
+}
+
+function asNumber(value, defaultValue) {
+  const parsed = Number(value)
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultValue
+}
+
+function asString(value) {
+  const normalized = String(value ?? '').trim()
+
+  return normalized || undefined
+}
+
+function getRuntimeReverbConfig() {
+  const config = getRuntimeConfig()
+
+  return config.reverb || {}
 }
 
 export function initializeEcho(token) {
@@ -23,11 +41,13 @@ export function initializeEcho(token) {
 
   window.Pusher = Pusher
 
-  const wsHost = import.meta.env.VITE_REVERB_HOST ?? window.location.hostname
-  const wsPort = Number(import.meta.env.VITE_REVERB_PORT ?? 8080)
-  const wssPort = Number(import.meta.env.VITE_REVERB_PORT ?? 443)
-  const forceTLS = asBoolean(import.meta.env.VITE_REVERB_TLS, false)
-  const key = import.meta.env.VITE_REVERB_APP_KEY ?? 'rescuelink-key'
+  const reverbConfig = getRuntimeReverbConfig()
+  const envPort = Number(import.meta.env.VITE_REVERB_PORT ?? 8080)
+  const wsHost = asString(reverbConfig.host) ?? import.meta.env.VITE_REVERB_HOST ?? window.location.hostname
+  const wsPort = asNumber(reverbConfig.port, envPort)
+  const wssPort = asNumber(reverbConfig.wssPort ?? reverbConfig.port, Number(import.meta.env.VITE_REVERB_PORT ?? 443))
+  const forceTLS = asBoolean(reverbConfig.tls ?? import.meta.env.VITE_REVERB_TLS, false)
+  const key = asString(reverbConfig.appKey) ?? import.meta.env.VITE_REVERB_APP_KEY ?? 'rescuelink-key'
 
   echoInstance = new Echo({
     broadcaster: 'reverb',

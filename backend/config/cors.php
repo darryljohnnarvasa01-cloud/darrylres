@@ -14,6 +14,11 @@ if (! function_exists('cors_allowed_origins')) {
         );
 
         return collect(explode(',', $origins))
+            ->merge([
+                env('FRONTEND_URL'),
+                env('CLOUDFLARE_FRONTEND_URL'),
+            ])
+            ->filter(fn ($origin): bool => is_string($origin))
             ->map(fn (string $origin): string => trim($origin))
             ->filter(fn (string $origin): bool => $origin !== '' && Str::startsWith($origin, 'http'))
             ->unique()

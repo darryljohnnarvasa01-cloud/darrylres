@@ -1,16 +1,45 @@
 ﻿import axios from 'axios'
 import { getAuthState } from './authStorage'
 
-function inferApiBaseUrl() {
+export function getRuntimeConfig() {
   if (typeof window === 'undefined') {
-    return ''
+    return {}
+  }
+
+  return window.__RESCUELINK_CONFIG__ || {}
+}
+
+function readRuntimeString(keys) {
+  const config = getRuntimeConfig()
+
+  for (const key of keys) {
+    const value = config[key]
+
+    if (typeof value === 'string' && value.trim() !== '') {
+      return value.trim()
+    }
   }
 
   return ''
 }
 
+function stripTrailingSlash(value) {
+  if (!value) {
+    return ''
+  }
+
+  return value.endsWith('/') ? value.slice(0, -1) : value
+}
+
+function inferApiBaseUrl() {
+  return stripTrailingSlash(readRuntimeString(['apiBaseUrl', 'api_base_url', 'VITE_API_BASE_URL']))
+}
+
 function resolveApiBaseUrl() {
-  return import.meta.env.VITE_API_BASE_URL?.trim() || inferApiBaseUrl()
+  const runtimeApiBaseUrl = inferApiBaseUrl()
+  const buildApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || ''
+
+  return stripTrailingSlash(runtimeApiBaseUrl || buildApiBaseUrl)
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()
