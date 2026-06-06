@@ -1,4 +1,4 @@
-import { Activity, Database, HardDrive, Radio, Server, Search, ShieldCheck, UserCircle2, Phone } from 'lucide-react'
+import { Activity, CloudUpload, Database, ExternalLink, HardDrive, Phone, Radio, Search, Server, ShieldCheck, UserCircle2 } from 'lucide-react'
 import { createElement, useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import AdminSidebar from '../../components/admin/AdminSidebar'
@@ -48,12 +48,13 @@ function displayIotRatio(totals) {
 }
 
 function AdminSystemPage() {
-  const { user, logout } = useAuth()
+  const { user, logout, can } = useAuth()
   const [loading, setLoading] = useState(false)
   const [health, setHealth] = useState(null)
   const [hotline, setHotline] = useState(() => localStorage.getItem('rescuelink_hotline') || '0966-123-4567')
   const [hotlineInput, setHotlineInput] = useState('')
   const [isEditingHotline, setIsEditingHotline] = useState(false)
+  const [backupLoading, setBackupLoading] = useState(false)
 
   const handleSaveHotline = () => {
     const cleaned = hotlineInput.trim()
@@ -81,6 +82,33 @@ function AdminSystemPage() {
       setLoading(false)
     }
   }, [])
+
+  const runGoogleDriveBackup = async () => {
+    setBackupLoading(true)
+    try {
+      const response = await api.post('/api/v1/admin/system/google-drive/backup')
+      const driveFile = response.data?.data?.backup?.drive_file
+      toast.success(driveFile?.name ? `Backup uploaded: ${driveFile.name}` : 'Google Drive backup uploaded.')
+      fetchHealth()
+    } catch (error) {
+      toast.error(parseApiError(error).message)
+    } finally {
+      setBackupLoading(false)
+    }
+  }
+
+  const openGoogleDriveAuth = async () => {
+    try {
+      const response = await api.get('/api/v1/admin/system/google-drive/auth-url')
+      const authUrl = response.data?.data?.auth_url
+
+      if (authUrl) {
+        window.open(authUrl, '_blank', 'noopener,noreferrer')
+      }
+    } catch (error) {
+      toast.error(parseApiError(error).message)
+    }
+  }
 
   useEffect(() => {
     fetchHealth()
@@ -269,6 +297,44 @@ function AdminSystemPage() {
                   {health.services?.storage?.error && (
                     <p className="mt-2 text-xs text-danger">{health.services.storage.error}</p>
                   )}
+                </article>
+
+                <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-navy">Google Drive Backup</p>
+                    <StatusBadge
+                      ok={Boolean(health.services?.google_drive?.ok)}
+                      healthyLabel="Configured"
+                      issueLabel="Needs config"
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Folder: {health.services?.google_drive?.has_backup_folder_id ? 'Configured' : 'Missing'}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    OAuth: {health.services?.google_drive?.has_client_config ? 'Configured' : 'Missing'}
+                  </p>
+                  {can('edit-system-settings') ? (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={runGoogleDriveBackup}
+                      disabled={backupLoading}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-danger px-3 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      <CloudUpload className="h-4 w-4" />
+                      {backupLoading ? 'Backing up...' : 'Run Backup'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openGoogleDriveAuth}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-navy"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      OAuth URL
+                    </button>
+                  </div>
+                  ) : null}
                 </article>
               </section>
 

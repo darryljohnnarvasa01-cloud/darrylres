@@ -2,19 +2,30 @@
 import { Toaster } from 'react-hot-toast'
 import { Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
+import AppErrorBoundary from './components/AppErrorBoundary'
 import ProtectedRoute from './components/ProtectedRoute'
+import VoiceCommandButton from './components/VoiceCommandButton'
+import { useOfflineSync } from './hooks/useOfflineSync'
 
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
 const VerifyIncidentPage = lazy(() => import('./pages/VerifyIncidentPage'))
+const PublicEmergencyProfilePage = lazy(() => import('./pages/PublicEmergencyProfilePage'))
 const DashboardPlaceholderPage = lazy(() => import('./pages/DashboardPlaceholderPage'))
 const ReportPage = lazy(() => import('./pages/ReportPage'))
 const MyReportsPage = lazy(() => import('./pages/MyReportsPage'))
+const BroadcastsPage = lazy(() => import('./pages/BroadcastsPage'))
+const VolunteerDashboardPage = lazy(() => import('./pages/VolunteerDashboardPage'))
+const EvacuationPage = lazy(() => import('./pages/EvacuationPage'))
+const SosPanicButton = lazy(() => import('./components/SosPanicButton'))
 const AdminDashboardPage = lazy(() => import('./pages/admin/AdminDashboardPage'))
+const AdminAiRiskPage = lazy(() => import('./pages/admin/AdminAiRiskPage'))
+const AdminHazardZonesPage = lazy(() => import('./pages/admin/AdminHazardZonesPage'))
 const AdminTriagePage = lazy(() => import('./pages/admin/AdminTriagePage'))
 const AdminRespondersPage = lazy(() => import('./pages/admin/AdminRespondersPage'))
 const AdminRegistrationsPage = lazy(() => import('./pages/admin/AdminRegistrationsPage'))
+const AdminRolesPage = lazy(() => import('./pages/admin/AdminRolesPage'))
 const AdminIotDevicesPage = lazy(() => import('./pages/admin/AdminIotDevicesPage'))
 const AdminAnalyticsPage = lazy(() => import('./pages/admin/AdminAnalyticsPage'))
 const AdminAuditPage = lazy(() => import('./pages/admin/AdminAuditPage'))
@@ -24,57 +35,85 @@ const StaffDashboardPage = lazy(() => import('./pages/staff/StaffDashboardPage')
 const StaffIncidentDetailPage = lazy(() => import('./pages/staff/StaffIncidentDetailPage'))
 
 function App() {
+  useOfflineSync()
+
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-panel font-body text-navy">
-        <Toaster
-          position="top-right"
-          gutter={12}
-          containerStyle={{ top: 20, right: 20 }}
-          toastOptions={{
-            duration: 4000,
-            className: 'admin-toast',
-            success: {
-              className: 'admin-toast admin-toast--success',
-            },
-            error: {
-              className: 'admin-toast admin-toast--error',
-            },
-            loading: {
-              className: 'admin-toast admin-toast--loading',
-            },
-          }}
-        />
-        <Suspense
-          fallback={(
-            <div className="flex min-h-screen items-center justify-center px-4">
-              <div className="admin-surface w-full max-w-md px-6 py-10 text-center">
-                <div className="admin-skeleton-block mx-auto h-14 w-14 rounded-2xl" />
-                <p className="mt-5 text-sm font-semibold uppercase tracking-[0.18em] text-info">RescueLink</p>
-                <p className="mt-2 text-base font-semibold text-navy">Loading workspace</p>
-                <p className="mt-2 text-sm text-slate-500">Preparing the latest command center view.</p>
+      <AppErrorBoundary>
+        <div className="min-h-screen bg-panel font-body text-navy">
+          <Toaster
+            position="top-right"
+            gutter={12}
+            containerStyle={{ top: 20, right: 20 }}
+            toastOptions={{
+              duration: 4000,
+              className: 'admin-toast',
+              success: {
+                className: 'admin-toast admin-toast--success',
+              },
+              error: {
+                className: 'admin-toast admin-toast--error',
+              },
+              loading: {
+                className: 'admin-toast admin-toast--loading',
+              },
+            }}
+          />
+          <Suspense
+            fallback={(
+              <div className="flex min-h-screen items-center justify-center px-4">
+                <div className="admin-surface w-full max-w-md px-6 py-10 text-center">
+                  <div className="admin-skeleton-block mx-auto h-14 w-14 rounded-2xl" />
+                  <p className="mt-5 text-sm font-semibold uppercase tracking-[0.18em] text-info">RescueLink</p>
+                  <p className="mt-2 text-base font-semibold text-navy">Loading workspace</p>
+                  <p className="mt-2 text-sm text-slate-500">Preparing the latest command center view.</p>
+                </div>
               </div>
-            </div>
-          )}
-        >
-          <Routes>
+            )}
+          >
+            <Routes>
             <Route path="/" element={<LandingPage />} />
             <Route path="/verify/:incidentCode" element={<VerifyIncidentPage />} />
+            <Route path="/qr/:qrUuid" element={<PublicEmergencyProfilePage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route
               path="/report"
-              element={
-                <ProtectedRoute roles={['citizen']}>
-                  <ReportPage />
-                </ProtectedRoute>
-              }
+              element={<ReportPage />}
+            />
+            <Route
+              path="/sos"
+              element={<SosPanicButton />}
             />
             <Route
               path="/my-reports"
               element={
                 <ProtectedRoute roles={['citizen']}>
                   <MyReportsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/broadcasts"
+              element={
+                <ProtectedRoute roles={['citizen']}>
+                  <BroadcastsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/volunteer"
+              element={
+                <ProtectedRoute roles={['citizen']}>
+                  <VolunteerDashboardPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/evacuation"
+              element={
+                <ProtectedRoute roles={['citizen']}>
+                  <EvacuationPage />
                 </ProtectedRoute>
               }
             />
@@ -95,6 +134,14 @@ function App() {
               }
             />
             <Route
+              path="/admin/roles"
+              element={
+                <ProtectedRoute roles={['admin']} ability="manage-roles">
+                  <AdminRolesPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin/registrations"
               element={
                 <ProtectedRoute roles={['admin']} ability="manage-users">
@@ -105,7 +152,7 @@ function App() {
             <Route
               path="/admin/dashboard"
               element={
-                <ProtectedRoute roles={['admin']} ability="manage-incidents">
+                <ProtectedRoute roles={['admin']} ability="view-dashboard">
                   <AdminDashboardPage mode="dashboard" />
                 </ProtectedRoute>
               }
@@ -123,6 +170,22 @@ function App() {
               element={
                 <ProtectedRoute roles={['admin']} ability="manage-incidents">
                   <AdminTriagePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/ai-risk"
+              element={
+                <ProtectedRoute roles={['admin']} ability="manage-incidents">
+                  <AdminAiRiskPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/hazard-zones"
+              element={
+                <ProtectedRoute roles={['admin']} ability="manage-incidents">
+                  <AdminHazardZonesPage />
                 </ProtectedRoute>
               }
             />
@@ -153,7 +216,7 @@ function App() {
             <Route
               path="/admin/audit"
               element={
-                <ProtectedRoute roles={['admin']}>
+                <ProtectedRoute roles={['admin']} ability="view-reports">
                   <AdminAuditPage />
                 </ProtectedRoute>
               }
@@ -169,7 +232,7 @@ function App() {
             <Route
               path="/admin/system"
               element={
-                <ProtectedRoute roles={['admin']}>
+                <ProtectedRoute roles={['admin']} ability="edit-system-settings">
                   <AdminSystemPage />
                 </ProtectedRoute>
               }
@@ -190,9 +253,11 @@ function App() {
                 </ProtectedRoute>
               }
             />
-          </Routes>
-        </Suspense>
-      </div>
+            </Routes>
+          </Suspense>
+          <VoiceCommandButton />
+        </div>
+      </AppErrorBoundary>
     </AuthProvider>
   )
 }

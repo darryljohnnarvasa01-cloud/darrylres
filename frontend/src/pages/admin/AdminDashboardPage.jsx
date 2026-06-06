@@ -1,5 +1,5 @@
 ﻿import { LayoutDashboard, ListFilter, Map, Search, UserCircle2, X } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Bot, Link2, MapPinned, ShieldCheck, Sparkles } from 'lucide-react'
 import { ArrowUpDown } from 'lucide-react'
@@ -13,8 +13,11 @@ import AdminSkeletonRows from '../../components/admin/AdminSkeletonRows'
 import AdminSidebar from '../../components/admin/AdminSidebar'
 import StatusPill from '../../components/incident/StatusPill'
 import NotificationBell from '../../components/notifications/NotificationBell'
+import AdminResponderTrackingMap from '../../components/tracking/AdminResponderTrackingMap'
+import HazardLayer from '../../components/maps/HazardLayer'
 import { useAuth } from '../../context/AuthContext'
 import { INCIDENT_TYPES, getIncidentType } from '../../data/incidentTypes'
+import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 import { api } from '../../lib/api'
 import { formatDateTime, timeAgo } from '../../lib/datetime'
 import { parseApiError } from '../../lib/errorUtils'
@@ -44,9 +47,9 @@ const TYPE_COLORS = {
   other: '#98A2B3',
 }
 
-const commandCenterFetcher = (path) => api.get(path).then((response) => response.data?.data ?? {})
+const commandCenterFetcher = (path) => api.get(path, { cacheTtl: 8000 }).then((response) => response.data?.data ?? {})
 
-function SortableHeader({ label, sortKey, currentSort, onToggle }) {
+const SortableHeader = memo(function SortableHeader({ label, sortKey, currentSort, onToggle }) {
   const active = currentSort.key === sortKey
 
   return (
@@ -61,7 +64,7 @@ function SortableHeader({ label, sortKey, currentSort, onToggle }) {
       <ArrowUpDown className={`h-3.5 w-3.5 transition ${active && currentSort.direction === 'asc' ? 'rotate-180' : ''}`} />
     </button>
   )
-}
+})
 
 function pinIcon(type, status, isIot) {
   const color = isIot ? '#D7263D' : TYPE_COLORS[type] ?? '#98A2B3'
@@ -74,7 +77,7 @@ function pinIcon(type, status, isIot) {
   })
 }
 
-function TypeBadge({ type }) {
+const TypeBadge = memo(function TypeBadge({ type }) {
   const typeData = getIncidentType(type)
   const Icon = typeData.icon
   return (
@@ -83,9 +86,9 @@ function TypeBadge({ type }) {
       {typeData.label}
     </span>
   )
-}
+})
 
-function Drawer({ incident, loading, staff, relatedIncidents = [], onOpenIncident, onClose, onVerify, onReject }) {
+const Drawer = memo(function Drawer({ incident, loading, staff, relatedIncidents = [], onOpenIncident, onClose, onVerify, onReject }) {
   const [assignedStaffId, setAssignedStaffId] = useState('')
   const [rejectionReason, setRejectionReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -399,19 +402,21 @@ function Drawer({ incident, loading, staff, relatedIncidents = [], onOpenInciden
       </div>
     </div>
   )
-}
+})
 
 function AdminDashboardPage({ mode = 'dashboard' }) {
   const { user, logout } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const [searchInput, setSearchInput] = useState('')
+  const debouncedSearchInput = useDebouncedValue(searchInput, 350)
   const [tableFilters, setTableFilters] = useState({ status: '', type: '', from_date: '', to_date: '', search: '' })
   const [tablePage, setTablePage] = useState(1)
   const [tableData, setTableData] = useState({ data: [], current_page: 1, last_page: 1 })
   const [tableSort, setTableSort] = useState({ key: 'created_at', direction: 'desc' })
   const [mapFilters, setMapFilters] = useState({ status: '', types: INCIDENT_TYPES.map((item) => item.value), date: '', today_only: false })
   const [mapIncidents, setMapIncidents] = useState([])
+  const [hazardZones, setHazardZones] = useState([])
   const [kpis, setKpis] = useState({})
   const [staff, setStaff] = useState([])
   const [tableLoading, setTableLoading] = useState(false)
@@ -447,7 +452,10 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
   const fetchTable = useCallback(async () => {
     setTableLoading(true)
     try {
-      const response = await api.get('/api/v1/admin/incidents', { params: { ...tableFilters, page: tablePage, lite: 1 } })
+      const response = await api.get('/api/v1/admin/incidents', {
+        params: { ...tableFilters, page: tablePage, lite: 1 },
+        cacheTtl: 8000,
+      })
       setTableData(response.data?.data?.incidents ?? { data: [], current_page: 1, last_page: 1 })
     } catch (error) {
       toast.error(parseApiError(error).message)
@@ -459,15 +467,20 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
   const fetchMap = useCallback(async () => {
     setMapLoading(true)
     try {
-      const response = await api.get('/api/v1/admin/incidents/map', {
-        params: {
-          status: mapFilters.status || undefined,
-          date: mapFilters.date || undefined,
-          today_only: mapFilters.today_only ? 1 : undefined,
-          types: mapFilters.types,
-        },
-      })
-      setMapIncidents(response.data?.data?.incidents ?? [])
+      const [incidentResponse, hazardResponse] = await Promise.all([
+        api.get('/api/v1/admin/incidents/map', {
+          params: {
+            status: mapFilters.status || undefined,
+            date: mapFilters.date || undefined,
+            today_only: mapFilters.today_only ? 1 : undefined,
+            types: mapFilters.types,
+          },
+          cacheTtl: 10000,
+        }),
+        api.get('/api/v1/admin/hazard-zones', { cacheTtl: 30000 }),
+      ])
+      setMapIncidents(incidentResponse.data?.data?.incidents ?? [])
+      setHazardZones(hazardResponse.data?.data?.hazard_zones ?? [])
     } catch (error) {
       toast.error(parseApiError(error).message)
     } finally {
@@ -477,7 +490,7 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
 
   const fetchKpis = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/admin/kpis')
+      const response = await api.get('/api/v1/admin/kpis', { cacheTtl: 15000 })
       setKpis(response.data?.data ?? {})
     } catch (error) {
       toast.error(parseApiError(error).message)
@@ -486,7 +499,7 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
 
   const fetchStaff = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/admin/staff')
+      const response = await api.get('/api/v1/admin/staff', { cacheTtl: 60000 })
       setStaff(response.data?.data?.staff ?? [])
     } catch (error) {
       toast.error(parseApiError(error).message)
@@ -498,7 +511,7 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
     setDrawerIncident(null)
     setDrawerRelatedIncidents([])
     try {
-      const response = await api.get(`/api/v1/admin/incidents/${incidentId}`)
+      const response = await api.get(`/api/v1/admin/incidents/${incidentId}`, { cacheTtl: 5000 })
       const incident = response.data?.data?.incident ?? null
       setDrawerIncident(incident)
       setDrawerRelatedIncidents(response.data?.data?.related_incidents ?? [])
@@ -561,6 +574,23 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
       fetchTable()
     }
   }, [fetchTable, isIncidentsView])
+
+  useEffect(() => {
+    if (!isIncidentsView) {
+      return
+    }
+
+    const nextSearch = debouncedSearchInput.trim()
+
+    setTableFilters((current) => {
+      if (current.search === nextSearch) {
+        return current
+      }
+
+      setTablePage(1)
+      return { ...current, search: nextSearch }
+    })
+  }, [debouncedSearchInput, isIncidentsView])
 
   useEffect(() => {
     if (isMapView) {
@@ -771,11 +801,13 @@ function AdminDashboardPage({ mode = 'dashboard' }) {
               This route is map-first and optimized for live geospatial monitoring.
             </div>
               )}
+              {isMapView && <AdminResponderTrackingMap />}
               {!isIncidentsView && (
             <section className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-card">
               <div className={isMapView ? 'h-[78vh] min-h-[620px]' : 'h-[70vh] min-h-[520px]'}>
               <MapContainer center={MAP_CENTER} zoom={13} className="h-full w-full">
                 <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                <HazardLayer zones={hazardZones} />
                 {mapIncidents.map((item) => (
                   <Marker key={item.id} position={[item.latitude, item.longitude]} icon={pinIcon(item.type, item.status, item.is_iot_generated)}>
                     <Popup>

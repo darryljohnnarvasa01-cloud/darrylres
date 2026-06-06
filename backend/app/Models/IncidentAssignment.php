@@ -20,12 +20,14 @@ class IncidentAssignment extends Model
         'staff_id',
         'assigned_by',
         'assigned_at',
+        'is_volunteer',
     ];
 
     protected function casts(): array
     {
         return [
             'assigned_at' => 'datetime',
+            'is_volunteer' => 'boolean',
         ];
     }
 

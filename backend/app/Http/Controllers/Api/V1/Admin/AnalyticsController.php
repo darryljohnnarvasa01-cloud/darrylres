@@ -3,12 +3,14 @@
 namespace App\Http\Controllers\Api\V1\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Models\FeedbackRating;
 use App\Models\Incident;
 use App\Models\IncidentAssignment;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Validator;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -24,18 +26,26 @@ class AnalyticsController extends Controller
             return $this->errorResponse('Validation failed.', $period['errors'], 422);
         }
 
-        $periodIncidents = $this->loadAnalyticsIncidents($period['from'], $period['to']);
+        $payload = Cache::remember(
+            $this->analyticsCacheKey('overview', $period['from'], $period['to']),
+            now()->addMinute(),
+            function () use ($period): array {
+                $periodIncidents = $this->loadAnalyticsIncidents($period['from'], $period['to']);
 
-        return $this->successResponse([
-            'from' => $period['from']->toDateString(),
-            'to' => $period['to']->toDateString(),
-            'kpis' => $this->buildKpisMetrics($period['from'], $period['to']),
-            'response_time_trend' => $this->buildResponseTimeTrend($period['to']),
-            'type_breakdown' => $this->buildTypeBreakdown($periodIncidents),
-            'barangay_risk_rows' => $this->buildBarangayRiskRows($periodIncidents),
-            'time_of_day_heatmap' => $this->buildTimeOfDayHeatmap($periodIncidents),
-            'incident_rows' => $this->buildIncidentRows($periodIncidents),
-        ], 'Analytics overview retrieved successfully.');
+                return [
+                    'from' => $period['from']->toDateString(),
+                    'to' => $period['to']->toDateString(),
+                    'kpis' => $this->buildKpisMetrics($period['from'], $period['to']),
+                    'response_time_trend' => $this->buildResponseTimeTrend($period['to']),
+                    'type_breakdown' => $this->buildTypeBreakdown($periodIncidents),
+                    'barangay_risk_rows' => $this->buildBarangayRiskRows($periodIncidents),
+                    'time_of_day_heatmap' => $this->buildTimeOfDayHeatmap($periodIncidents),
+                    'incident_rows' => $this->buildIncidentRows($periodIncidents),
+                ];
+            }
+        );
+
+        return $this->successResponse($payload, 'Analytics overview retrieved successfully.');
     }
 
     public function monthly(Request $request)
@@ -52,45 +62,49 @@ class AnalyticsController extends Controller
         $start = Carbon::create($year, 1, 1)->startOfDay();
         $end = Carbon::create($year, 12, 31)->endOfDay();
 
-        $incidents = Incident::query()
-            ->with(['logs' => function ($query) use ($start, $end): void {
-                $query
-                    ->where('new_status', 'resolved')
-                    ->whereBetween('created_at', [$start, $end]);
-            }])
-            ->whereBetween('created_at', [$start, $end])
-            ->get(['id', 'created_at']);
+        $payload = Cache::remember("analytics.monthly.{$year}.v2", now()->addMinutes(5), function () use ($year, $start, $end): array {
+            $incidents = Incident::query()
+                ->with(['logs' => function ($query) use ($start, $end): void {
+                    $query
+                        ->where('new_status', 'resolved')
+                        ->whereBetween('created_at', [$start, $end]);
+                }])
+                ->whereBetween('created_at', [$start, $end])
+                ->get(['id', 'created_at']);
 
-        $submittedByMonth = array_fill(1, 12, 0);
-        $resolvedByMonth = array_fill(1, 12, 0);
+            $submittedByMonth = array_fill(1, 12, 0);
+            $resolvedByMonth = array_fill(1, 12, 0);
 
-        foreach ($incidents as $incident) {
-            $submittedMonth = (int) $incident->created_at?->month;
+            foreach ($incidents as $incident) {
+                $submittedMonth = (int) $incident->created_at?->month;
 
-            if ($submittedMonth > 0) {
-                $submittedByMonth[$submittedMonth]++;
+                if ($submittedMonth > 0) {
+                    $submittedByMonth[$submittedMonth]++;
+                }
+
+                $resolvedLog = $incident->logs->first();
+
+                if ($resolvedLog && $resolvedLog->created_at) {
+                    $resolvedMonth = (int) $resolvedLog->created_at->month;
+                    $resolvedByMonth[$resolvedMonth]++;
+                }
             }
 
-            $resolvedLog = $incident->logs->first();
+            $rows = collect(range(1, 12))
+                ->map(fn (int $month) => [
+                    'month' => Carbon::create($year, $month, 1)->format('M'),
+                    'submitted' => $submittedByMonth[$month],
+                    'resolved' => $resolvedByMonth[$month],
+                ])
+                ->values();
 
-            if ($resolvedLog && $resolvedLog->created_at) {
-                $resolvedMonth = (int) $resolvedLog->created_at->month;
-                $resolvedByMonth[$resolvedMonth]++;
-            }
-        }
+            return [
+                'year' => $year,
+                'rows' => $rows,
+            ];
+        });
 
-        $rows = collect(range(1, 12))
-            ->map(fn (int $month) => [
-                'month' => Carbon::create($year, $month, 1)->format('M'),
-                'submitted' => $submittedByMonth[$month],
-                'resolved' => $resolvedByMonth[$month],
-            ])
-            ->values();
-
-        return $this->successResponse([
-            'year' => $year,
-            'rows' => $rows,
-        ], 'Monthly analytics retrieved successfully.');
+        return $this->successResponse($payload, 'Monthly analytics retrieved successfully.');
     }
 
     public function byType(Request $request)
@@ -101,7 +115,7 @@ class AnalyticsController extends Controller
             return $this->errorResponse('Validation failed.', $period['errors'], 422);
         }
 
-        $rows = Incident::query()
+        $rows = Cache::remember($this->analyticsCacheKey('by-type', $period['from'], $period['to']), now()->addMinutes(5), fn () => Incident::query()
             ->selectRaw('type, COUNT(*) as count')
             ->whereBetween('created_at', [$period['from'], $period['to']])
             ->groupBy('type')
@@ -111,7 +125,7 @@ class AnalyticsController extends Controller
                 'type' => $row->type,
                 'count' => (int) $row->count,
             ])
-            ->values();
+            ->values());
 
         return $this->successResponse([
             'from' => $period['from']->toDateString(),
@@ -128,7 +142,7 @@ class AnalyticsController extends Controller
             return $this->errorResponse('Validation failed.', $period['errors'], 422);
         }
 
-        $rows = Incident::query()
+        $rows = Cache::remember($this->analyticsCacheKey('by-barangay', $period['from'], $period['to']), now()->addMinutes(5), fn () => Incident::query()
             ->whereBetween('created_at', [$period['from'], $period['to']])
             ->get(['address_label'])
             ->map(function ($incident) {
@@ -145,7 +159,7 @@ class AnalyticsController extends Controller
             ])
             ->sortByDesc('count')
             ->take(5)
-            ->values();
+            ->values());
 
         return $this->successResponse([
             'from' => $period['from']->toDateString(),
@@ -162,8 +176,14 @@ class AnalyticsController extends Controller
             return $this->errorResponse('Validation failed.', $period['errors'], 422);
         }
 
+        $kpis = Cache::remember(
+            $this->analyticsCacheKey('kpis', $period['from'], $period['to']),
+            now()->addMinute(),
+            fn () => $this->buildKpisMetrics($period['from'], $period['to'])
+        );
+
         return $this->successResponse(
-            $this->buildKpisMetrics($period['from'], $period['to']) + [
+            $kpis + [
                 'from' => $period['from']->toDateString(),
                 'to' => $period['to']->toDateString(),
             ],
@@ -304,6 +324,8 @@ class AnalyticsController extends Controller
             })
             ->distinct('staff_id')
             ->count('staff_id');
+        $feedbackQuery = FeedbackRating::query()
+            ->whereBetween('created_at', [$from, $to]);
 
         return [
             'avg_verification_hours' => $this->avgHours($verificationDurations),
@@ -312,6 +334,8 @@ class AnalyticsController extends Controller
             'total_last_period' => $totalLastPeriod,
             'pct_change' => $pctChange,
             'active_staff_count' => $activeStaffCount,
+            'avg_feedback_rating' => round((float) (clone $feedbackQuery)->avg('rating'), 2),
+            'feedback_count' => (clone $feedbackQuery)->count(),
         ];
     }
 
@@ -537,5 +561,10 @@ class AnalyticsController extends Controller
         $parts = array_filter(array_map('trim', explode(',', $address)));
 
         return $parts[0] ?? ($address !== '' ? $address : 'Unknown');
+    }
+
+    private function analyticsCacheKey(string $scope, Carbon $from, Carbon $to): string
+    {
+        return "analytics.{$scope}.{$from->toDateString()}.{$to->toDateString()}.v2";
     }
 }

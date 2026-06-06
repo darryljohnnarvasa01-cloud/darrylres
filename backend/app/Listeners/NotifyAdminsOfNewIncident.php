@@ -6,9 +6,17 @@ use App\Events\NewIncidentSubmitted;
 use App\Events\NotificationCreated;
 use App\Models\Notification;
 use App\Models\User;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
-class NotifyAdminsOfNewIncident
+class NotifyAdminsOfNewIncident implements ShouldQueue
 {
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public int $backoff = 5;
+
     /**
      * Handle the event.
      */

@@ -22,14 +22,43 @@ if (! function_exists('cors_allowed_origins')) {
     }
 }
 
+if (! function_exists('cors_allowed_origin_patterns')) {
+    /**
+     * @return array<int, string>
+     */
+    function cors_allowed_origin_patterns(): array
+    {
+        $patterns = (string) env('CORS_ALLOWED_ORIGIN_PATTERNS', '');
+
+        $configured = collect(explode(',', $patterns))
+            ->map(fn (string $pattern): string => trim($pattern))
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($configured !== []) {
+            return $configured;
+        }
+
+        if ((string) env('APP_ENV', 'production') === 'production') {
+            return [];
+        }
+
+        return [
+            '#^https?://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?$#',
+            '#^https?://192\.168\.[0-9]{1,3}\.[0-9]{1,3}(:[0-9]+)?$#',
+        ];
+    }
+}
+
 return [
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'broadcasting/auth', 'sanctum/csrf-cookie'],
 
     'allowed_methods' => ['*'],
 
     'allowed_origins' => cors_allowed_origins(),
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => cors_allowed_origin_patterns(),
 
     'allowed_headers' => ['*'],
 

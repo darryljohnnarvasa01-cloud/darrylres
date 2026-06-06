@@ -170,6 +170,22 @@ body {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--pin-color) 25%, transparent);
 }
 
+.responder-map-pin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.responder-map-pin--incident {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+}
+
 .admin-pin.pin-pulse::after {
   content: '';
   position: absolute;
@@ -352,6 +368,17 @@ body {
 
 .landing-map--terrain .leaflet-tile-pane {
   filter: saturate(1.05) contrast(1.02);
+}
+
+.landing-mobile-panel {
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
+}
+
+@media (max-height: 700px) and (max-width: 1023px) {
+  .landing-mobile-panel {
+    max-height: 46svh;
+  }
 }
 
 @keyframes landingLiveBlink {

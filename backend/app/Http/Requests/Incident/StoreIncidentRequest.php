@@ -51,13 +51,18 @@ class StoreIncidentRequest extends ApiFormRequest
     {
         return [
             'type' => ['required', 'in:fire,medical,crime,flood,accident,other'],
+            'client_uuid' => ['required_with:offline_media', 'nullable', 'uuid'],
             'description' => ['required', 'string', 'min:20', 'max:1000'],
             'incident_datetime' => ['required', 'date', 'before_or_equal:now'],
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
             'address_label' => ['required', 'string', 'max:255'],
-            'media' => ['required', 'array', 'min:1'],
+            'media' => ['required_without:offline_media', 'array', 'min:1', 'max:5'],
             'media.*' => ['required', 'file', 'mimes:jpeg,png,jpg,mp4,mov', 'max:10240'],
+            'offline_media' => ['required_without:media', 'array', 'min:1', 'max:5'],
+            'offline_media.*.file_path' => ['required', 'string', 'max:500'],
+            'offline_media.*.file_type' => ['required', 'in:image,video'],
+            'offline_media.*.token' => ['required', 'string', 'size:64'],
             'client_timezone' => ['nullable', 'timezone'],
             'force_submit' => ['nullable', 'boolean'],
         ];

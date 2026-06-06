@@ -1,6 +1,6 @@
 import { ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import BrandMark from '../components/BrandMark'
 import { useAuth } from '../context/AuthContext'
@@ -16,6 +16,12 @@ function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { login } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const isGuestTransition = Boolean(location.state?.fromGuestReporting || location.state?.fromGuestLimit)
+  const returnTo =
+    typeof location.state?.returnTo === 'string' && location.state.returnTo.startsWith('/')
+      ? location.state.returnTo
+      : null
 
   const handleSubmit = async (event) => {
     event.preventDefault()
@@ -27,15 +33,20 @@ function LoginPage() {
       await ensureCsrfCookie()
       const response = await api.post('/api/v1/auth/login', { email, password })
       const payload = response.data?.data
+      const role = payload?.role ?? payload?.user?.role
 
-      login({
+      const { claimedCount } = await login({
         user: payload.user,
         token: payload.token,
-        role: payload.role,
+        role,
       })
 
-      toast.success('Signed in successfully.')
-      navigate(getDefaultRouteForUser(payload.user, payload.role))
+      toast.success(
+        claimedCount > 0
+          ? `${claimedCount} guest report${claimedCount === 1 ? '' : 's'} added to your account.`
+          : 'Signed in successfully.',
+      )
+      navigate(returnTo ?? getDefaultRouteForUser(payload.user, role))
     } catch (error) {
       const parsed = parseApiError(error)
       setErrors(parsed.fields)
@@ -52,6 +63,12 @@ function LoginPage() {
         <BrandMark />
         <h1 className="mt-6 text-center font-heading text-3xl italic text-navy">Welcome Back</h1>
         <p className="mt-2 text-center text-sm text-slate-500">Sign in to continue to RescueLink.</p>
+
+        {isGuestTransition && (
+          <div className="mt-4 rounded-xl border border-info/20 bg-blue-50 px-3 py-2 text-sm text-slate-600">
+            Sign in to your account and we&apos;ll attach the guest reports from this device to your profile.
+          </div>
+        )}
 
         {statusMessage && (
           <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -102,7 +119,7 @@ function LoginPage() {
 
         <p className="mt-4 text-center text-sm text-slate-500">
           No account yet?{' '}
-          <Link to="/register" className="font-medium text-danger">
+          <Link to="/register" state={location.state} className="font-medium text-danger">
             Register
           </Link>
         </p>

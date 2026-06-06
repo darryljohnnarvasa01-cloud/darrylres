@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1\Admin;
 use App\Http\Controllers\Controller;
 use App\Support\ApiResponse;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 class AdminStaffPerformanceController extends Controller
@@ -27,6 +28,11 @@ class AdminStaffPerformanceController extends Controller
     public function index()
     {
         $generatedAt = now();
+        $cacheKey = 'admin.staff_performance.v3';
+
+        if ($cached = Cache::get($cacheKey)) {
+            return $this->successResponse($cached, 'Staff performance data retrieved successfully.');
+        }
 
         $staff = DB::table('users')
             ->where('role', 'staff')
@@ -42,10 +48,14 @@ class AdminStaffPerformanceController extends Controller
             ]);
 
         if ($staff->isEmpty()) {
-            return $this->successResponse([
+            $payload = [
                 'staff' => [],
                 'meta' => $this->buildMeta($generatedAt),
-            ], 'Staff performance data retrieved successfully.');
+            ];
+
+            Cache::put($cacheKey, $payload, now()->addSeconds(30));
+
+            return $this->successResponse($payload, 'Staff performance data retrieved successfully.');
         }
 
         $staffIds = $staff->pluck('id')->values();
@@ -259,10 +269,14 @@ class AdminStaffPerformanceController extends Controller
             $payload[] = $metric;
         }
 
-        return $this->successResponse([
+        $payload = [
             'staff' => $payload,
             'meta' => $this->buildMeta($generatedAt),
-        ], 'Staff performance data retrieved successfully.');
+        ];
+
+        Cache::put($cacheKey, $payload, now()->addSeconds(30));
+
+        return $this->successResponse($payload, 'Staff performance data retrieved successfully.');
     }
 
     private function buildMonthTemplate(Carbon $generatedAt): array

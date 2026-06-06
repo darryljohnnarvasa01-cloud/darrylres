@@ -9,13 +9,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Admin\RejectIncidentRequest;
 use App\Http\Requests\Admin\VerifyIncidentRequest;
 use App\Http\Requests\Staff\UpdateStaffIncidentStatusRequest;
+use App\Http\Resources\Api\V1\IncidentDetailResource;
+use App\Http\Resources\Api\V1\IncidentSummaryResource;
 use App\Models\Incident;
 use App\Models\User;
+use App\Services\Admin\CommandCenterService;
 use App\Support\ApiResponse;
 use App\Support\AuditLogger;
 use App\Support\IncidentStatusProgression;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
@@ -41,42 +46,79 @@ class AdminIncidentController extends Controller
 
         $validated = $validator->validated();
         $lite = $request->boolean('lite');
+        $page = max(1, (int) $request->query('page', 1));
+        $perPage = (int) ($validated['per_page'] ?? 15);
+        $cacheKey = 'admin.incidents.index.v5.'.md5(json_encode([
+            'filters' => $validated,
+            'lite' => $lite,
+            'page' => $page,
+            'per_page' => $perPage,
+        ]));
 
-        if ($lite) {
-            $query = Incident::query()
-                ->select([
-                    'id',
-                    'reference_code',
-                    'reporter_id',
-                    'type',
-                    'latitude',
-                    'longitude',
-                    'address_label',
-                    'status',
-                    'created_at',
-                ])
-                ->with([
-                    'reporter:id,full_name,barangay',
-                    'assignments.staff:id,full_name',
-                ])
-                ->orderByDesc('created_at');
-        } else {
-            $query = Incident::query()
-                ->with([
-                    'reporter:id,full_name,email,phone,barangay,address,role,status',
-                    'media',
-                    'assignments.staff:id,full_name,email,phone,barangay,role,status',
-                ])
-                ->orderByDesc('created_at');
-        }
+        $payload = Cache::remember($cacheKey, now()->addSeconds(8), function () use ($validated, $lite, $perPage): array {
+            if ($lite) {
+                $query = Incident::query()
+                    ->select([
+                        'id',
+                        'reference_code',
+                        'reporter_id',
+                        'is_guest',
+                        'type',
+                        'latitude',
+                        'longitude',
+                        'address_label',
+                        'status',
+                        'is_iot_generated',
+                        'incident_datetime',
+                        'created_at',
+                    ])
+                    ->with([
+                        'reporter:id,full_name,barangay',
+                        'latestAssignment.staff:id,full_name,barangay,role,status',
+                    ])
+                    ->orderByDesc('created_at');
+            } else {
+                $query = Incident::query()
+                    ->select([
+                        'id',
+                        'reference_code',
+                        'reporter_id',
+                        'is_guest',
+                        'type',
+                        'description',
+                        'incident_datetime',
+                        'latitude',
+                        'longitude',
+                        'address_label',
+                        'status',
+                        'is_iot_generated',
+                        'device_id',
+                        'rejection_reason',
+                        'resolved_at',
+                        'created_at',
+                        'updated_at',
+                    ])
+                    ->with([
+                        'reporter:id,full_name,email,phone,barangay,address,role,status',
+                        'media',
+                        'latestAssignment.staff:id,full_name,email,phone,barangay,role,status',
+                    ])
+                    ->orderByDesc('created_at');
+            }
 
-        $this->applyIncidentFilters($query, $validated);
+            $this->applyIncidentFilters($query, $validated);
 
-        $incidents = $query->paginate($validated['per_page'] ?? 15)->withQueryString();
+            $incidents = $query->paginate($perPage)->withQueryString();
+            $incidents->getCollection()->transform(
+                fn (Incident $incident) => (new IncidentSummaryResource($incident))->resolve()
+            );
 
-        return $this->successResponse([
-            'incidents' => $incidents,
-        ], 'Admin incidents retrieved successfully.');
+            return [
+                'incidents' => $incidents->toArray(),
+            ];
+        });
+
+        return $this->successResponse($payload, 'Admin incidents retrieved successfully.');
     }
 
     public function map(Request $request)
@@ -101,48 +143,56 @@ class AdminIncidentController extends Controller
         }
 
         $validated = $validator->validated();
+        $cacheKey = 'admin.incidents.map.v3.'.md5(json_encode($validated));
 
-        $query = Incident::query()
-            ->with(['reporter:id,full_name'])
-            ->orderByDesc('created_at');
+        $incidents = Cache::remember($cacheKey, now()->addSeconds(10), function () use ($validated): array {
+            $query = Incident::query()
+                ->with(['reporter:id,full_name', 'latestAssignment.staff:id,full_name'])
+                ->orderByDesc('created_at');
 
-        if (! empty($validated['status'])) {
-            $query->where('status', $validated['status']);
-        } else {
-            // Keep the default map view focused on active work.
-            $query->where('status', '!=', 'resolved');
-        }
+            if (! empty($validated['status'])) {
+                $query->where('status', $validated['status']);
+            } else {
+                // Keep the default map view focused on active work.
+                $query->where('status', '!=', 'resolved');
+            }
 
-        if (! empty($validated['type'])) {
-            $query->where('type', $validated['type']);
-        }
+            if (! empty($validated['type'])) {
+                $query->where('type', $validated['type']);
+            }
 
-        if (! empty($validated['types'])) {
-            $query->whereIn('type', $validated['types']);
-        }
+            if (! empty($validated['types'])) {
+                $query->whereIn('type', $validated['types']);
+            }
 
-        if (! empty($validated['date'])) {
-            $query->whereDate('created_at', $validated['date']);
-        }
+            if (! empty($validated['date'])) {
+                $day = Carbon::parse($validated['date']);
+                $query->whereBetween('created_at', [$day->copy()->startOfDay(), $day->copy()->endOfDay()]);
+            }
 
-        if (($validated['today_only'] ?? false) === true) {
-            $query->whereDate('created_at', now()->toDateString());
-        }
+            if (($validated['today_only'] ?? false) === true) {
+                $query->whereBetween('created_at', [now()->startOfDay(), now()->endOfDay()]);
+            }
 
-        $incidents = $query->get([
-            'id',
-            'type',
-            'status',
-            'latitude',
-            'longitude',
-            'address_label',
-            'description',
-            'reporter_id',
-            'is_iot_generated',
-            'device_id',
-            'incident_datetime',
-            'created_at',
-        ]);
+            $incidents = $query->limit(500)->get([
+                'id',
+                'reference_code',
+                'type',
+                'status',
+                'latitude',
+                'longitude',
+                'address_label',
+                'description',
+                'reporter_id',
+                'is_guest',
+                'is_iot_generated',
+                'device_id',
+                'incident_datetime',
+                'created_at',
+            ]);
+
+            return IncidentSummaryResource::collection($incidents)->resolve();
+        });
 
         return $this->successResponse([
             'incidents' => $incidents,
@@ -151,64 +201,87 @@ class AdminIncidentController extends Controller
 
     public function triageBoard()
     {
-        $statusLimits = [
-            'pending_verification' => 50,
-            'verified' => 50,
-            'under_assessment' => 50,
-            'responding' => 50,
-            'resolved' => 30,
-        ];
+        $payload = Cache::remember('admin.triage_board.v3', now()->addSeconds(10), function (): array {
+            $statusLimits = [
+                'pending_verification' => 50,
+                'verified' => 50,
+                'under_assessment' => 50,
+                'responding' => 50,
+                'resolved' => 30,
+            ];
 
-        $orderedIds = collect();
+            $rankedIds = DB::table('incidents')
+                ->select([
+                    'id',
+                    'status',
+                    DB::raw('ROW_NUMBER() OVER (PARTITION BY status ORDER BY created_at DESC) as status_rank'),
+                ])
+                ->whereIn('status', array_keys($statusLimits));
 
-        foreach ($statusLimits as $status => $limit) {
-            $orderedIds = $orderedIds->concat(
-                Incident::query()
-                    ->where('status', $status)
-                    ->orderByDesc('created_at')
-                    ->limit($limit)
-                    ->pluck('id')
-            );
-        }
+            $orderedIds = DB::query()
+                ->fromSub($rankedIds, 'ranked_incidents')
+                ->where(function ($query) use ($statusLimits): void {
+                    foreach ($statusLimits as $status => $limit) {
+                        $query->orWhere(function ($statusQuery) use ($status, $limit): void {
+                            $statusQuery
+                                ->where('status', $status)
+                                ->where('status_rank', '<=', $limit);
+                        });
+                    }
+                })
+                ->orderByRaw("CASE status
+                    WHEN 'pending_verification' THEN 1
+                    WHEN 'verified' THEN 2
+                    WHEN 'under_assessment' THEN 3
+                    WHEN 'responding' THEN 4
+                    WHEN 'resolved' THEN 5
+                    ELSE 6
+                END")
+                ->orderBy('status_rank')
+                ->pluck('id');
 
-        if ($orderedIds->isEmpty()) {
-            return $this->successResponse([
+            if ($orderedIds->isEmpty()) {
+                return [
+                    'incidents' => [
+                        'data' => [],
+                    ],
+                ];
+            }
+
+            $incidentsById = Incident::query()
+                ->select([
+                    'id',
+                    'reference_code',
+                    'reporter_id',
+                    'is_guest',
+                    'type',
+                    'latitude',
+                    'longitude',
+                    'address_label',
+                    'status',
+                    'created_at',
+                ])
+                ->with([
+                    'reporter:id,full_name,barangay',
+                    'latestAssignment.staff:id,full_name,barangay,role,status',
+                ])
+                ->whereIn('id', $orderedIds->all())
+                ->get()
+                ->keyBy('id');
+
+            $incidents = $orderedIds
+                ->map(fn ($id) => $incidentsById->get($id))
+                ->filter()
+                ->values();
+
+            return [
                 'incidents' => [
-                    'data' => [],
+                    'data' => IncidentSummaryResource::collection($incidents)->resolve(),
                 ],
-            ], 'Triage board incidents retrieved successfully.');
-        }
+            ];
+        });
 
-        $incidentsById = Incident::query()
-            ->select([
-                'id',
-                'reference_code',
-                'reporter_id',
-                'type',
-                'latitude',
-                'longitude',
-                'address_label',
-                'status',
-                'created_at',
-            ])
-            ->with([
-                'reporter:id,full_name,barangay',
-                'assignments.staff:id,full_name',
-            ])
-            ->whereIn('id', $orderedIds->all())
-            ->get()
-            ->keyBy('id');
-
-        $incidents = $orderedIds
-            ->map(fn ($id) => $incidentsById->get($id))
-            ->filter()
-            ->values();
-
-        return $this->successResponse([
-            'incidents' => [
-                'data' => $incidents,
-            ],
-        ], 'Triage board incidents retrieved successfully.');
+        return $this->successResponse($payload, 'Triage board incidents retrieved successfully.');
     }
 
     public function show(Incident $incident)
@@ -224,12 +297,12 @@ class AdminIncidentController extends Controller
         $relatedIncidents = $this->findRelatedIncidents($incident);
 
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => (new IncidentDetailResource($incident))->resolve(),
             'related_incidents' => $relatedIncidents,
         ], 'Admin incident detail retrieved successfully.');
     }
 
-    public function verify(VerifyIncidentRequest $request, Incident $incident)
+    public function verify(VerifyIncidentRequest $request, Incident $incident, CommandCenterService $commandCenter)
     {
         if ($incident->status !== 'pending_verification') {
             return $this->errorResponse(
@@ -308,12 +381,14 @@ class AdminIncidentController extends Controller
             ],
         );
 
+        $commandCenter->clear();
+
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => (new IncidentDetailResource($incident))->resolve(),
         ], 'Incident verified and assigned successfully.');
     }
 
-    public function reject(RejectIncidentRequest $request, Incident $incident)
+    public function reject(RejectIncidentRequest $request, Incident $incident, CommandCenterService $commandCenter)
     {
         if ($incident->status !== 'pending_verification') {
             return $this->errorResponse(
@@ -370,12 +445,14 @@ class AdminIncidentController extends Controller
             ],
         );
 
+        $commandCenter->clear();
+
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => (new IncidentDetailResource($incident))->resolve(),
         ], 'Incident rejected successfully.');
     }
 
-    public function updateStatus(UpdateStaffIncidentStatusRequest $request, string $incidentId)
+    public function updateStatus(UpdateStaffIncidentStatusRequest $request, string $incidentId, CommandCenterService $commandCenter)
     {
         $admin = $request->user();
         $validated = $request->validated();
@@ -481,77 +558,23 @@ class AdminIncidentController extends Controller
             );
         }
 
+        $commandCenter->clear();
+
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => $incident ? (new IncidentDetailResource($incident))->resolve() : null,
         ], 'Incident status updated successfully.');
     }
 
-    public function staff()
+    public function staff(CommandCenterService $commandCenter)
     {
-        $staff = User::query()
-            ->where('role', 'staff')
-            ->where('status', 'verified')
-            ->orderBy('full_name')
-            ->get([
-                'id',
-                'full_name',
-                'email',
-                'phone',
-                'barangay',
-                'status',
-            ]);
-
         return $this->successResponse([
-            'staff' => $staff,
+            'staff' => $commandCenter->verifiedStaff(),
         ], 'Staff list retrieved successfully.');
     }
 
-    public function kpis()
+    public function kpis(CommandCenterService $commandCenter)
     {
-        $totalToday = Incident::query()->whereDate('created_at', now()->toDateString())->count();
-        $pendingVerification = Incident::query()->where('status', 'pending_verification')->count();
-        $activeResponding = Incident::query()
-            ->whereIn('status', ['verified', 'under_assessment', 'responding'])
-            ->count();
-
-        $resolvedThisMonth = Incident::query()
-            ->whereHas('logs', function (Builder $query): void {
-                $query
-                    ->where('new_status', 'resolved')
-                    ->whereBetween('created_at', [now()->startOfMonth(), now()->endOfMonth()]);
-            })
-            ->count();
-
-        $responseDurations = Incident::query()
-            ->with(['logs' => function ($query): void {
-                $query
-                    ->whereIn('new_status', ['under_assessment', 'responding', 'resolved'])
-                    ->orderBy('created_at');
-            }])
-            ->get()
-            ->map(function (Incident $incident) {
-                $responseLog = $incident->logs->first();
-
-                if (! $responseLog) {
-                    return null;
-                }
-
-                return $incident->created_at?->diffInMinutes($responseLog->created_at) / 60;
-            })
-            ->filter(fn ($value) => $value !== null)
-            ->values();
-
-        $avgResponseHours = $responseDurations->isNotEmpty()
-            ? round((float) $responseDurations->avg(), 2)
-            : 0;
-
-        return $this->successResponse([
-            'total_today' => $totalToday,
-            'pending_verification' => $pendingVerification,
-            'active_responding' => $activeResponding,
-            'resolved_this_month' => $resolvedThisMonth,
-            'avg_response_hours' => $avgResponseHours,
-        ], 'KPI data retrieved successfully.');
+        return $this->successResponse($commandCenter->kpis(), 'KPI data retrieved successfully.');
     }
 
     private function applyIncidentFilters(Builder $query, array $validated): void
@@ -565,23 +588,29 @@ class AdminIncidentController extends Controller
         }
 
         if (! empty($validated['from_date'])) {
-            $query->whereDate('created_at', '>=', $validated['from_date']);
+            $query->where('created_at', '>=', Carbon::parse($validated['from_date'])->startOfDay());
         }
 
         if (! empty($validated['to_date'])) {
-            $query->whereDate('created_at', '<=', $validated['to_date']);
+            $query->where('created_at', '<=', Carbon::parse($validated['to_date'])->endOfDay());
         }
 
         if (! empty($validated['search'])) {
             $search = trim((string) $validated['search']);
+            $like = DB::connection()->getDriverName() === 'pgsql' ? 'ilike' : 'like';
+            $pattern = "%{$search}%";
 
-            $query->where(function (Builder $nestedQuery) use ($search): void {
+            $query->where(function (Builder $nestedQuery) use ($like, $pattern): void {
+                if (DB::connection()->getDriverName() === 'pgsql') {
+                    $nestedQuery->whereRaw('incidents.id::text ILIKE ?', [$pattern]);
+                } else {
+                    $nestedQuery->where('incidents.id', 'like', $pattern);
+                }
+
                 $nestedQuery
-                    ->where('id', 'like', "%{$search}%")
-                    ->orWhere('reference_code', 'like', "%{$search}%")
-                    ->orWhere('reporter_id', 'like', "%{$search}%")
-                    ->orWhereHas('reporter', function (Builder $reporterQuery) use ($search): void {
-                        $reporterQuery->where('full_name', 'like', "%{$search}%");
+                    ->orWhere('reference_code', $like, $pattern)
+                    ->orWhereHas('reporter', function (Builder $reporterQuery) use ($like, $pattern): void {
+                        $reporterQuery->where('full_name', $like, $pattern);
                     });
             });
         }
@@ -618,6 +647,7 @@ class AdminIncidentController extends Controller
                 'type',
                 'status',
                 'reporter_id',
+                'is_guest',
                 'latitude',
                 'longitude',
                 'created_at',

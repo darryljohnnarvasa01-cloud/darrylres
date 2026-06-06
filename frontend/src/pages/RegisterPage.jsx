@@ -1,6 +1,6 @@
 import { ImagePlus, UploadCloud, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
 import BrandMark from '../components/BrandMark'
 import { VALENCIA_BARANGAYS } from '../data/barangays'
@@ -15,14 +15,22 @@ const initialForm = {
   phone: '',
   barangay: '',
   address: '',
+  agree_to_terms: false,
 }
 
 function RegisterPage() {
   const [form, setForm] = useState(initialForm)
   const [govIdFile, setGovIdFile] = useState(null)
   const [errors, setErrors] = useState({})
+  const [agreeToTerms, setAgreeToTerms] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
+  const isGuestTransition = Boolean(location.state?.fromGuestReporting || location.state?.fromGuestLimit)
+  const returnTo =
+    typeof location.state?.returnTo === 'string' && location.state.returnTo.startsWith('/')
+      ? location.state.returnTo
+      : '/report'
 
   const previewUrl = useMemo(() => {
     if (!govIdFile) {
@@ -57,6 +65,11 @@ function RegisterPage() {
   const handleSubmit = async (event) => {
     event.preventDefault()
 
+    if (!agreeToTerms) {
+      setErrors((prev) => ({ ...prev, agree_to_terms: 'You must agree to the terms to register.' }))
+      return
+    }
+
     if (!govIdFile) {
       setErrors((prev) => ({ ...prev, gov_id_image: 'Government ID image is required.' }))
       return
@@ -80,7 +93,13 @@ function RegisterPage() {
         },
       })
       toast.success('Registration submitted! Wait for admin approval.')
-      navigate('/login')
+      navigate('/login', {
+        state: {
+          fromGuestReporting: isGuestTransition,
+          fromGuestRegistration: isGuestTransition,
+          returnTo,
+        },
+      })
     } catch (error) {
       const parsed = parseApiError(error)
       setErrors(parsed.fields)
@@ -105,6 +124,12 @@ function RegisterPage() {
         <p className="mt-2 text-center text-sm text-slate-500">
           Register as a Valencia City resident to submit emergency reports.
         </p>
+
+        {isGuestTransition && (
+          <div className="mt-4 rounded-xl border border-info/20 bg-blue-50 px-3 py-2 text-sm text-slate-600">
+            Once your account is approved, sign in on this device and we&apos;ll attach your guest reports to your profile automatically.
+          </div>
+        )}
 
         <form className="mt-6 space-y-4" onSubmit={handleSubmit}>
           <div>
@@ -237,6 +262,25 @@ function RegisterPage() {
             {errors.gov_id_image && <p className="error-text">{errors.gov_id_image}</p>}
           </div>
 
+          <div className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              id="agree_to_terms"
+              checked={agreeToTerms}
+              onChange={(event) => {
+                setAgreeToTerms(event.target.checked)
+                setErrors((prev) => ({ ...prev, agree_to_terms: undefined }))
+              }}
+              className="mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 text-danger focus:ring-danger"
+            />
+            <label htmlFor="agree_to_terms" className="cursor-pointer text-xs text-slate-600">
+              I agree to the collection and use of my personal data for emergency response purposes,
+              including sharing information with relevant authorities as needed to process and respond
+              to emergency reports.
+            </label>
+          </div>
+          {errors.agree_to_terms && <p className="error-text">{errors.agree_to_terms}</p>}
+
           <button
             type="submit"
             disabled={isSubmitting}
@@ -248,7 +292,7 @@ function RegisterPage() {
 
         <p className="mt-4 text-center text-sm text-slate-500">
           Already registered?{' '}
-          <Link to="/login" className="font-medium text-danger">
+          <Link to="/login" state={location.state} className="font-medium text-danger">
             Sign in
           </Link>
         </p>

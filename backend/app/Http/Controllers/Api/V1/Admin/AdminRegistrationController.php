@@ -138,12 +138,13 @@ class AdminRegistrationController extends Controller
         }
 
         $path = 'gov_ids/'.$filename;
+        $disk = Storage::disk(config('filesystems.government_id_disk', 'private'));
 
-        if (! Storage::disk('private')->exists($path)) {
+        if (! $disk->exists($path)) {
             return $this->errorResponse('File not found.', [], 404);
         }
 
-        return response()->file(Storage::disk('private')->path($path), [
+        return $disk->response($path, $filename, [
             'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
         ]);
     }

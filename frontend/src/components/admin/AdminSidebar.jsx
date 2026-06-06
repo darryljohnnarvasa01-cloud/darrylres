@@ -2,7 +2,9 @@ import {
   Activity,
   BarChart3,
   BellRing,
+  Bot,
   ClipboardList,
+  MapPinned,
   LayoutDashboard,
   LogOut,
   Map,
@@ -10,6 +12,7 @@ import {
   PanelLeftOpen,
   RadioTower,
   Shield,
+  ShieldCheck,
   UserCircle2,
   UserRoundCheck,
   Users,
@@ -25,12 +28,15 @@ const NAV_GROUPS = [
   {
     label: 'Operations',
     items: [
-      { label: 'Dashboard', to: '/admin/dashboard', ability: 'manage-incidents', icon: LayoutDashboard },
+      { label: 'Dashboard', to: '/admin/dashboard', ability: 'view-dashboard', icon: LayoutDashboard },
       { label: 'Triage', to: '/admin/triage', ability: 'manage-incidents', icon: ClipboardList },
+      { label: 'AI Risk', to: '/admin/ai-risk', ability: 'manage-incidents', icon: Bot },
+      { label: 'Hazard Zones', to: '/admin/hazard-zones', ability: 'manage-incidents', icon: MapPinned },
       { label: 'Responders', to: '/admin/responders', icon: UserRoundCheck },
       { label: 'Incidents', to: '/admin/incidents', ability: 'manage-incidents', icon: Activity },
       { label: 'Map View', to: '/admin/map', ability: 'manage-incidents', icon: Map },
       { label: 'Registrations', to: '/admin/registrations', ability: 'manage-users', icon: Users },
+      { label: 'Roles', to: '/admin/roles', ability: 'manage-roles', icon: ShieldCheck },
       { label: 'IoT Devices', to: '/admin/iot-devices', ability: 'manage-iot', icon: RadioTower },
       { label: 'Notifications', to: '/admin/notifications', ability: 'broadcast-messages', icon: BellRing },
     ],
@@ -44,8 +50,8 @@ const NAV_GROUPS = [
   {
     label: 'System',
     items: [
-      { label: 'Audit Logs', to: '/admin/audit', icon: Shield },
-      { label: 'System', to: '/admin/system', icon: Activity },
+      { label: 'Audit Logs', to: '/admin/audit', ability: 'view-reports', icon: Shield },
+      { label: 'System', to: '/admin/system', ability: 'edit-system-settings', icon: Activity },
     ],
   },
 ]
@@ -104,8 +110,7 @@ function AdminSidebar({ user, onLogout }) {
             <PanelLeftOpen className="h-4 w-4" />
           </button>
         ) : (
-          <p className="mt-4 rounded-2xl bg-navy px-3 py-3 text-xs font-medium text-slate-200">
-            Command center workspace for dispatch, analytics, and system control.
+          <p className="">
           </p>
         )}
       </div>

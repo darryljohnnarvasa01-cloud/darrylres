@@ -1,4 +1,4 @@
-import { ArrowUpDown, BarChart3, Clock3, Search, UserCircle2, X } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowUpDown, BarChart3, Clock3, HeartPulse, Search, ShieldAlert, UserCircle2, X } from 'lucide-react'
 import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import toast from 'react-hot-toast'
@@ -11,6 +11,7 @@ import { getIncidentType } from '../../data/incidentTypes'
 import { api } from '../../lib/api'
 import { formatDateTime } from '../../lib/datetime'
 import { parseApiError } from '../../lib/errorUtils'
+import { healthEventMessage } from '../../lib/responderTracking'
 import { VALENCIA_BARANGAYS } from '../../data/barangays'
 
 const PERFORMANCE_VARIANTS = {
@@ -19,8 +20,10 @@ const PERFORMANCE_VARIANTS = {
   'Needs Improvement': 'border-amber-200 bg-amber-50 text-amber-700',
 }
 
+const RESPONDER_PAGE_SIZE = 25
+
 function swrFetcher(path) {
-  return api.get(path).then((response) => response.data?.data ?? {})
+  return api.get(path, { cacheTtl: 30000 }).then((response) => response.data?.data ?? {})
 }
 
 function formatMinutes(value) {
@@ -125,10 +128,91 @@ function DetailMetric({ label, value, helper }) {
   )
 }
 
+const SEVERITY_STYLES = {
+  info: 'border-blue-200 bg-blue-50 text-blue-700',
+  warning: 'border-amber-200 bg-amber-50 text-amber-700',
+  critical: 'border-danger/30 bg-danger/10 text-danger',
+}
+
+function SeverityBadge({ severity }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.info}`}>
+      {severity === 'critical' ? <ShieldAlert className="h-3 w-3" /> : <Activity className="h-3 w-3" />}
+      {severity}
+    </span>
+  )
+}
+
+function SimpleSparkline({ data, width = 280, height = 60 }) {
+  if (!data.length) return <div className="text-xs text-slate-400">No data</div>
+  const minVal = Math.min(...data)
+  const maxVal = Math.max(...data)
+  const range = maxVal - minVal || 1
+  const stepX = width / Math.max(1, data.length - 1)
+  const points = data.map((val, i) => {
+    const x = i * stepX
+    const y = height - ((val - minVal) / range) * (height - 4) - 2
+    return `${x},${y}`
+  }).join(' ')
+  return (
+    <svg width={width} height={height} className="overflow-visible">
+      <polyline points={points} fill="none" stroke="#2563EB" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+      {data.map((val, i) => {
+        const x = i * stepX
+        const y = height - ((val - minVal) / range) * (height - 4) - 2
+        return <circle key={i} cx={x} cy={y} r={2} fill="#2563EB" />
+      })}
+    </svg>
+  )
+}
+
 function ResponderDetailDrawer({ staff, meta, onClose }) {
   const performance = assessPerformance(staff)
   const monthlyCounts = useMemo(() => staff?.monthly_incident_counts ?? [], [staff])
   const timeline = useMemo(() => staff?.recent_incidents ?? [], [staff])
+  const [activeTab, setActiveTab] = useState('performance')
+  const [healthLogs, setHealthLogs] = useState([])
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [healthCollapsed, setHealthCollapsed] = useState(false)
+
+  useEffect(() => {
+    if (activeTab !== 'health' || !staff?.id) {
+      return
+    }
+
+    let active = true
+    setHealthLoading(true)
+
+    api.get(`/api/v1/admin/responders/${staff.id}/health-logs?per_page=50`)
+      .then((response) => {
+        if (active) {
+          setHealthLogs(response.data?.data?.logs ?? [])
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setHealthLogs([])
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setHealthLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [activeTab, staff?.id])
+
+  const accuracySparklineData = useMemo(() => {
+    const cutoff = Date.now() - 20 * 60 * 1000
+    return healthLogs
+      .filter((log) => log.event_type === 'gps_degraded' && log.payload?.accuracy != null && new Date(log.recorded_at).getTime() > cutoff)
+      .map((log) => log.payload.accuracy)
+      .slice(0, 20)
+      .reverse()
+  }, [healthLogs])
 
   if (!staff) {
     return null
@@ -170,97 +254,186 @@ function ResponderDetailDrawer({ staff, meta, onClose }) {
               <X className="h-4 w-4" />
             </button>
           </div>
+
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveTab('performance')}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${activeTab === 'performance' ? 'bg-navy text-white' : 'border border-slate-200 text-slate-600'}`}
+            >
+              Performance
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('health')}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold ${activeTab === 'health' ? 'bg-navy text-white' : 'border border-slate-200 text-slate-600'}`}
+            >
+              <HeartPulse className="h-3.5 w-3.5" />
+              Device & Link Health
+            </button>
+          </div>
         </div>
 
-        <div className="space-y-5 p-5">
-          <section className="grid gap-3 sm:grid-cols-2">
-            <DetailMetric label="Handled This Month" value={staff.incidents_handled_this_month ?? 0} helper="Distinct incidents touched in the current month." />
-            <DetailMetric label="Open Assignments" value={staff.current_open_assignments ?? 0} helper="Incidents still active on the board." />
-            <DetailMetric label="Avg Response Time" value={formatMinutes(staff.avg_response_minutes)} helper={`On-time means the first response lands within ${meta?.response_sla_minutes ?? 15} minutes after assignment.`} />
-            <DetailMetric label="Avg Resolution Time" value={formatMinutes(staff.avg_resolution_minutes)} helper="Measured from assignment to resolved status." />
-          </section>
+        {activeTab === 'performance' && (
+          <div className="space-y-5 p-5">
+            <section className="grid gap-3 sm:grid-cols-2">
+              <DetailMetric label="Handled This Month" value={staff.incidents_handled_this_month ?? 0} helper="Distinct incidents touched in the current month." />
+              <DetailMetric label="Open Assignments" value={staff.current_open_assignments ?? 0} helper="Incidents still active on the board." />
+              <DetailMetric label="Avg Response Time" value={formatMinutes(staff.avg_response_minutes)} helper={`On-time means the first response lands within ${meta?.response_sla_minutes ?? 15} minutes after assignment.`} />
+              <DetailMetric label="Avg Resolution Time" value={formatMinutes(staff.avg_resolution_minutes)} helper="Measured from assignment to resolved status." />
+            </section>
 
-          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Six-Month Volume</p>
-                <h3 className="mt-1 text-xl font-semibold text-navy">Handled incidents by month</h3>
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Six-Month Volume</p>
+                  <h3 className="mt-1 text-xl font-semibold text-navy">Handled incidents by month</h3>
+                </div>
+                <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
+                  {staff.total_assignments ?? 0} total assignments
+                </div>
               </div>
-              <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
-                {staff.total_assignments ?? 0} total assignments
-              </div>
-            </div>
 
-            <div className="mt-4">
-              {monthlyCounts.some((row) => row.count > 0) ? (
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={monthlyCounts}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                    <XAxis dataKey="label" />
-                    <YAxis allowDecimals={false} />
-                    <Tooltip formatter={(value) => [`${value} incidents`, 'Handled']} labelFormatter={(value, payload) => `${value} ${payload?.[0]?.payload?.year ?? ''}`.trim()} />
-                    <Bar dataKey="count" fill="#2563EB" radius={[10, 10, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+              <div className="mt-4">
+                {monthlyCounts.some((row) => row.count > 0) ? (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={monthlyCounts}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                      <XAxis dataKey="label" />
+                      <YAxis allowDecimals={false} />
+                      <Tooltip formatter={(value) => [`${value} incidents`, 'Handled']} labelFormatter={(value, payload) => `${value} ${payload?.[0]?.payload?.year ?? ''}`.trim()} />
+                      <Bar dataKey="count" fill="#2563EB" radius={[10, 10, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <EmptyState
+                    title="No monthly activity yet"
+                    description="This responder has not been assigned any incidents in the last six months."
+                  />
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Recent Timeline</p>
+                  <h3 className="mt-1 text-xl font-semibold text-navy">Last 10 handled incidents</h3>
+                </div>
+                <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
+                  {timeline.length} entries
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-3">
+                {timeline.length ? (
+                  timeline.map((incident) => {
+                    const typeData = getIncidentType(incident.type)
+                    const TypeIcon = typeData.icon
+
+                    return (
+                      <article key={incident.incident_id} className="rounded-2xl border border-slate-200 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold text-slate-700">
+                                <TypeIcon className="h-3.5 w-3.5" />
+                                {typeData.label}
+                              </span>
+                              <span className="text-sm font-semibold text-navy">{incident.reference_code}</span>
+                              <span className="text-xs text-slate-500">{incident.barangay}</span>
+                            </div>
+                            <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                              <p>Assigned: {formatDateTime(incident.assigned_at)}</p>
+                              <p>Last Activity: {formatDateTime(incident.last_activity_at)}</p>
+                              <p>Response: {formatMinutes(incident.response_minutes)}</p>
+                              <p>Resolution: {formatMinutes(incident.resolution_minutes)}</p>
+                            </div>
+                          </div>
+                          <StatusPill status={incident.status} />
+                        </div>
+                      </article>
+                    )
+                  })
+                ) : (
+                  <EmptyState
+                    title="No handled incidents yet"
+                    description="Timeline entries will appear here as soon as this responder is assigned to incidents."
+                  />
+                )}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'health' && (
+          <div className="space-y-5 p-5">
+            {accuracySparklineData.length > 1 && (
+              <section className="rounded-2xl border border-slate-200 bg-panel p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">GPS Accuracy (last 20 min)</p>
+                <div className="mt-2">
+                  <SimpleSparkline data={accuracySparklineData} />
+                </div>
+              </section>
+            )}
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Device & Link Health</p>
+                  <h3 className="mt-1 text-xl font-semibold text-navy">Health event feed</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHealthCollapsed((v) => !v)}
+                  className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-500"
+                >
+                  {healthCollapsed ? 'Expand' : 'Collapse'}
+                </button>
+              </div>
+
+              {healthLoading ? (
+                <div className="mt-4 space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="h-12 animate-pulse rounded-xl bg-slate-100" />
+                  ))}
+                </div>
+              ) : healthLogs.length === 0 ? (
+                <div className="mt-4">
+                  <EmptyState
+                    title="No health events recorded"
+                    description="Telemetry will appear here when the responder device reports GPS, connectivity, or battery issues."
+                  />
+                </div>
               ) : (
-                <EmptyState
-                  title="No monthly activity yet"
-                  description="This responder has not been assigned any incidents in the last six months."
-                />
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Recent Timeline</p>
-                <h3 className="mt-1 text-xl font-semibold text-navy">Last 10 handled incidents</h3>
-              </div>
-              <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
-                {timeline.length} entries
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {timeline.length ? (
-                timeline.map((incident) => {
-                  const typeData = getIncidentType(incident.type)
-                  const TypeIcon = typeData.icon
-
-                  return (
-                    <article key={incident.incident_id} className="rounded-2xl border border-slate-200 p-4">
-                      <div className="flex items-start justify-between gap-3">
+                <div className={`mt-4 space-y-3 ${healthCollapsed ? 'max-h-24 overflow-hidden' : ''}`}>
+                  {healthLogs.slice(0, 50).map((log) => (
+                    <article key={log.id} className="rounded-2xl border border-slate-200 p-3">
+                      <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold text-slate-700">
-                              <TypeIcon className="h-3.5 w-3.5" />
-                              {typeData.label}
-                            </span>
-                            <span className="text-sm font-semibold text-navy">{incident.reference_code}</span>
-                            <span className="text-xs text-slate-500">{incident.barangay}</span>
+                            <SeverityBadge severity={log.severity} />
+                            <span className="text-xs font-semibold text-navy">{log.event_type.replaceAll('_', ' ')}</span>
+                            {log.incident?.reference_code && (
+                              <span className="text-[11px] text-slate-500">{log.incident.reference_code}</span>
+                            )}
                           </div>
-                          <div className="mt-3 grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
-                            <p>Assigned: {formatDateTime(incident.assigned_at)}</p>
-                            <p>Last Activity: {formatDateTime(incident.last_activity_at)}</p>
-                            <p>Response: {formatMinutes(incident.response_minutes)}</p>
-                            <p>Resolution: {formatMinutes(incident.resolution_minutes)}</p>
-                          </div>
+                          <p className="mt-1 text-xs text-slate-600">
+                            {healthEventMessage(log.event_type, log.payload)}
+                            {log.payload?.accuracy != null && ` — ${Math.round(log.payload.accuracy)} m`}
+                          </p>
                         </div>
-                        <StatusPill status={incident.status} />
+                        <span className="shrink-0 text-[11px] text-slate-400">
+                          {new Date(log.recorded_at).toLocaleTimeString()}
+                        </span>
                       </div>
                     </article>
-                  )
-                })
-              ) : (
-                <EmptyState
-                  title="No handled incidents yet"
-                  description="Timeline entries will appear here as soon as this responder is assigned to incidents."
-                />
+                  ))}
+                </div>
               )}
-            </div>
-          </section>
-        </div>
+            </section>
+          </div>
+        )}
       </aside>
     </>
   )
@@ -275,6 +448,7 @@ function AdminRespondersPage() {
     direction: 'desc',
   })
   const [selectedStaffId, setSelectedStaffId] = useState(null)
+  const [rowPage, setRowPage] = useState(1)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [createForm, setCreateForm] = useState({
     full_name: '',
@@ -289,7 +463,9 @@ function AdminRespondersPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false)
 
   const { data, error, isLoading, isValidating, mutate } = useSWR('/api/v1/admin/staff/performance', swrFetcher, {
-    revalidateOnFocus: true,
+    dedupingInterval: 30000,
+    refreshInterval: 60000,
+    revalidateOnFocus: false,
   })
 
   useEffect(() => {
@@ -342,6 +518,30 @@ function AdminRespondersPage() {
 
     return rows
   }, [filteredRows, sortConfig.direction, sortConfig.key])
+
+  useEffect(() => {
+    setRowPage(1)
+  }, [deferredSearch, sortConfig.direction, sortConfig.key])
+
+  const totalRowPages = Math.max(1, Math.ceil(sortedRows.length / RESPONDER_PAGE_SIZE))
+  const visibleRows = useMemo(() => {
+    const safePage = Math.min(rowPage, totalRowPages)
+    const start = (safePage - 1) * RESPONDER_PAGE_SIZE
+
+    return sortedRows.slice(start, start + RESPONDER_PAGE_SIZE)
+  }, [rowPage, sortedRows, totalRowPages])
+
+  const rowRange = useMemo(() => {
+    if (!sortedRows.length) {
+      return '0'
+    }
+
+    const safePage = Math.min(rowPage, totalRowPages)
+    const start = (safePage - 1) * RESPONDER_PAGE_SIZE + 1
+    const end = Math.min(start + RESPONDER_PAGE_SIZE - 1, sortedRows.length)
+
+    return `${start}-${end}`
+  }, [rowPage, sortedRows.length, totalRowPages])
 
   const selectedStaff = useMemo(
     () => staffRows.find((row) => row.id === selectedStaffId) ?? null,
@@ -493,7 +693,7 @@ function AdminRespondersPage() {
                 />
               </div>
               <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
-                {sortedRows.length} responders
+                {rowRange} of {sortedRows.length} responders
               </div>
               <div className="ml-auto inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600">
                 <Clock3 className={`h-4 w-4 ${isValidating ? 'animate-spin' : ''}`} />
@@ -537,7 +737,7 @@ function AdminRespondersPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRows.map((row) => {
+                    {visibleRows.map((row) => {
                       const performance = assessPerformance(row)
 
                       return (
@@ -577,6 +777,31 @@ function AdminRespondersPage() {
                 />
               )}
             </div>
+            {sortedRows.length > RESPONDER_PAGE_SIZE && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                <p className="text-sm text-slate-500">
+                  Page {Math.min(rowPage, totalRowPages)} of {totalRowPages}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={rowPage <= 1}
+                    onClick={() => setRowPage((page) => Math.max(1, page - 1))}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rowPage >= totalRowPages}
+                    onClick={() => setRowPage((page) => Math.min(totalRowPages, page + 1))}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         </main>
       </div>

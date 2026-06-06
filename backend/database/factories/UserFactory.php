@@ -32,6 +32,9 @@ class UserFactory extends Factory
             'barangay' => fake()->citySuffix(),
             'role' => 'citizen',
             'status' => 'verified',
+            'is_volunteer' => false,
+            'volunteer_skills' => null,
+            'volunteer_availability' => false,
             'remember_token' => Str::random(10),
         ];
     }

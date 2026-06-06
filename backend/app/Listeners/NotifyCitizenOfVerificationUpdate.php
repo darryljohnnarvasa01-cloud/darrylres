@@ -5,9 +5,17 @@ namespace App\Listeners;
 use App\Events\IncidentVerificationUpdated;
 use App\Events\NotificationCreated;
 use App\Models\Notification;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
-class NotifyCitizenOfVerificationUpdate
+class NotifyCitizenOfVerificationUpdate implements ShouldQueue
 {
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public int $backoff = 5;
+
     /**
      * Handle the event.
      */

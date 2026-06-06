@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Support\ApiResponse;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 
 class NotificationController extends Controller
 {
@@ -24,6 +25,7 @@ class NotificationController extends Controller
                 'title',
                 'message',
                 'link',
+                'channel',
                 'is_read',
                 'created_at',
             ]);
@@ -44,6 +46,7 @@ class NotificationController extends Controller
         }
 
         $notification->update(['is_read' => true]);
+        $this->clearUnreadCountCache($request->user());
 
         return $this->successResponse([
             'notification' => $notification->fresh(),
@@ -57,6 +60,7 @@ class NotificationController extends Controller
             ->update([
                 'is_read' => true,
             ]);
+        $this->clearUnreadCountCache($request->user());
 
         return $this->successResponse([
             'updated' => $updated,
@@ -65,9 +69,12 @@ class NotificationController extends Controller
 
     public function unreadCount(Request $request)
     {
-        $count = $this->queryForUser($request->user())
-            ->where('is_read', false)
-            ->count();
+        $user = $request->user();
+        $count = Cache::remember(
+            $this->unreadCountCacheKey($user),
+            now()->addSeconds(20),
+            fn () => $this->queryForUser($user)->where('is_read', false)->count()
+        );
 
         return $this->successResponse([
             'count' => $count,
@@ -88,5 +95,15 @@ class NotificationController extends Controller
                 },
                 fn (Builder $query) => $query->where('user_id', $user->id)
             );
+    }
+
+    private function unreadCountCacheKey(User $user): string
+    {
+        return "notifications.unread.{$user->id}.v2";
+    }
+
+    private function clearUnreadCountCache(User $user): void
+    {
+        Cache::forget($this->unreadCountCacheKey($user));
     }
 }

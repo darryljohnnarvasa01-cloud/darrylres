@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\Api\V1\IncidentSummaryResource;
 use App\Models\Incident;
 use App\Support\ApiResponse;
 use App\Support\IncidentVerification;
@@ -17,7 +18,7 @@ class PublicIncidentController extends Controller
 
     public function map()
     {
-        $incidents = Cache::remember('public_incidents_map_v2', 60, function () {
+        $incidents = Cache::remember('public_incidents_map_v3', 60, function () {
             return Incident::query()
                 ->whereIn('status', ['pending_verification', 'verified', 'under_assessment', 'responding'])
                 ->orderByDesc('created_at')
@@ -29,11 +30,13 @@ class PublicIncidentController extends Controller
                     'created_at',
                     'latitude',
                     'longitude',
+                    'confirmations_count',
+                    'disputes_count',
                 ]);
         });
 
         return $this->successResponse([
-            'incidents' => $incidents,
+            'incidents' => IncidentSummaryResource::collection($incidents)->resolve(),
         ], 'Public incident map data retrieved successfully.');
     }
 
@@ -63,21 +66,25 @@ class PublicIncidentController extends Controller
                     'created_at',
                     'latitude',
                     'longitude',
+                    'confirmations_count',
+                    'disputes_count',
                 ]);
         });
 
         return $this->successResponse([
-            'incidents' => $incidents,
+            'incidents' => IncidentSummaryResource::collection($incidents)->resolve(),
         ], 'Public recent incidents retrieved successfully.');
     }
 
     public function stats()
     {
         $stats = Cache::remember('public_incident_stats_v2', 60, function () {
+            $todayStart = now()->startOfDay();
+            $todayEnd = now()->endOfDay();
             $totalReported = Incident::query()->count();
             $totalResolved = Incident::query()->where('status', 'resolved')->count();
             $activeToday = Incident::query()
-                ->whereDate('created_at', now()->toDateString())
+                ->whereBetween('created_at', [$todayStart, $todayEnd])
                 ->whereIn('status', ['pending_verification', 'verified', 'under_assessment', 'responding'])
                 ->count();
 
@@ -139,6 +146,10 @@ class PublicIncidentController extends Controller
                     'status',
                     'address_label',
                     'created_at',
+                    'latitude',
+                    'longitude',
+                    'confirmations_count',
+                    'disputes_count',
                 ]);
         });
 
@@ -157,6 +168,11 @@ class PublicIncidentController extends Controller
                 'verification_path' => IncidentVerification::verificationPath((string) $incident->reference_code),
                 'verification_url' => IncidentVerification::verificationUrl((string) $incident->reference_code),
                 'qr_code_svg' => IncidentVerification::qrCodeSvgDataUri((string) $incident->reference_code),
+                'latitude' => (float) $incident->latitude,
+                'longitude' => (float) $incident->longitude,
+                'confirmations_count' => (int) $incident->confirmations_count,
+                'disputes_count' => (int) $incident->disputes_count,
+                'credibility_badge' => $incident->credibilityBadge(),
                 'official_seal' => [
                     'name' => 'CDRRMO Valencia City, Bukidnon',
                     'label' => 'Official Verification Seal',

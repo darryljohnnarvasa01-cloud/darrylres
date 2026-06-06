@@ -1,7 +1,5 @@
 <?php
 
-use Laravel\Sanctum\Sanctum;
-
 return [
 
     /*
@@ -15,12 +13,7 @@ return [
     |
     */
 
-    'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', sprintf(
-        '%s%s',
-        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1',
-        Sanctum::currentApplicationUrlWithPort(),
-        // Sanctum::currentRequestHost(),
-    ))),
+    'stateful' => array_values(array_filter(array_map('trim', explode(',', env('SANCTUM_STATEFUL_DOMAINS', ''))))),
 
     /*
     |--------------------------------------------------------------------------
@@ -34,7 +27,7 @@ return [
     |
     */
 
-    'guard' => ['web'],
+    'guard' => [],
 
     /*
     |--------------------------------------------------------------------------
@@ -48,6 +41,21 @@ return [
     */
 
     'expiration' => null,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Token Resolution Performance
+    |--------------------------------------------------------------------------
+    |
+    | Remote Supabase databases make the bearer-token lookup expensive. A short
+    | cache removes repeated token/user reads during admin page bursts while
+    | keeping revocation delay bounded by the TTL.
+    |
+    */
+
+    'last_used_at' => env('SANCTUM_UPDATE_LAST_USED_AT', false),
+
+    'token_cache_ttl' => (int) env('SANCTUM_TOKEN_CACHE_TTL', 30),
 
     /*
     |--------------------------------------------------------------------------

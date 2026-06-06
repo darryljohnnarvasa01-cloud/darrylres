@@ -6,9 +6,17 @@ use App\Events\NotificationCreated;
 use App\Events\RegistrationSubmitted;
 use App\Models\Notification;
 use App\Models\User;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
-class NotifyAdminsOfNewRegistration
+class NotifyAdminsOfNewRegistration implements ShouldQueue
 {
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public int $backoff = 5;
+
     public function handle(RegistrationSubmitted $event): void
     {
         $fullName = (string) ($event->payload['full_name'] ?? 'New applicant');

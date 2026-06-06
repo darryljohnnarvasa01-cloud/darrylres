@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\CreateStaffRequest;
 use App\Models\User;
 use App\Support\ApiResponse;
 use App\Support\AuditLogger;
+use Illuminate\Support\Facades\Cache;
 
 class AdminStaffController extends Controller
 {
@@ -37,6 +38,10 @@ class AdminStaffController extends Controller
                 'target_role' => $staff->role,
             ],
         );
+
+        Cache::forget('admin.staff_performance.v3');
+        Cache::forget('admin.verified_staff.v2');
+        Cache::forget('admin.command_center.snapshot.v4');
 
         return $this->successResponse([
             'staff' => $this->serializeStaff($staff),

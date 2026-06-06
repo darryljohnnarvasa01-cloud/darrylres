@@ -11,7 +11,22 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ['react', 'react-dom', 'react-router-dom'],
+            maps: ['leaflet', 'react-leaflet', 'leaflet.heat'],
+            charts: ['recharts'],
+            realtime: ['laravel-echo', 'pusher-js'],
+            export: ['html2canvas', 'jspdf'],
+          },
+        },
+      },
+    },
     server: {
+      host: true,
+      allowedHosts: ['all'],
       proxy: {
         '/api': {
           target: apiTarget,

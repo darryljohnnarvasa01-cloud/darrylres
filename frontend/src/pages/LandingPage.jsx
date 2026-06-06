@@ -1,14 +1,19 @@
 import { ArrowRight, LogIn, MapPinned, ShieldCheck, Zap, Radio, Siren, Phone, WifiOff } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { MapContainer, Marker, Popup, TileLayer, Polygon } from 'react-leaflet'
 import L from 'leaflet'
 import BrandMark from '../components/BrandMark'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 import StatusPill from '../components/incident/StatusPill'
-import { useAuth } from '../context/AuthContext'
+import CrowdsourceButtons from '../components/CrowdsourceButtons'
+import HazardLayer from '../components/maps/HazardLayer'
 import { getIncidentType } from '../data/incidentTypes'
 import { api } from '../lib/api'
 import { timeAgo } from '../lib/datetime'
+import { isPointInHazardZone } from '../lib/hazardGeometry'
+import { useI18n } from '../lib/i18n'
 
 const MAP_CENTER = [7.9062, 125.0936]
 
@@ -2514,13 +2519,14 @@ function markerIcon(type, status) {
 }
 
 function LandingTypeBadge({ type }) {
+  const { t } = useI18n()
   const typeData = getIncidentType(type)
   const Icon = typeData.icon
 
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${typeData.chipClass}`}>
       <Icon className="h-3.5 w-3.5" />
-      {typeData.label}
+      {t(typeData.label)}
     </span>
   )
 }
@@ -2536,8 +2542,10 @@ function clampToInt(value) {
 }
 
 function LandingPage() {
-  const { isAuthenticated, role } = useAuth()
+  const { t } = useI18n()
   const [mapIncidents, setMapIncidents] = useState([])
+  const [hazardZones, setHazardZones] = useState([])
+  const [currentLocation, setCurrentLocation] = useState(null)
   const [recentIncidents, setRecentIncidents] = useState([])
   const [mapStyleId, setMapStyleId] = useState(MAP_STYLE_OPTIONS[0].id)
   const [stats, setStats] = useState({
@@ -2555,14 +2563,8 @@ function LandingPage() {
     active_today: 0,
   })
   const [isOnline, setIsOnline] = useState(navigator.onLine)
-
-  const reportHref = useMemo(() => {
-    if (isAuthenticated && role === 'citizen') {
-      return '/report'
-    }
-
-    return '/register'
-  }, [isAuthenticated, role])
+  const warnedHazardIdRef = useRef(null)
+  const reportHref = '/report'
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true)
@@ -2645,16 +2647,68 @@ function LandingPage() {
     }
   }, [])
 
+  const fetchHazardZones = useCallback(async () => {
+    try {
+      const response = await api.get('/api/v1/public/hazard-zones', {
+        cache: false,
+      })
+      setHazardZones(response.data?.data?.hazard_zones ?? [])
+    } catch {
+      setHazardZones([])
+    }
+  }, [])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchPublicData()
+    fetchHazardZones()
 
     const timer = setInterval(() => {
       fetchPublicData()
+      fetchHazardZones()
     }, 30000)
 
     return () => clearInterval(timer)
-  }, [fetchPublicData])
+  }, [fetchHazardZones, fetchPublicData])
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return undefined
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setCurrentLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        })
+      },
+      () => {
+        setCurrentLocation(null)
+      },
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 10000 },
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [])
+
+  useEffect(() => {
+    if (!currentLocation || hazardZones.length === 0) {
+      return
+    }
+
+    const activeZone = hazardZones.find((zone) => zone.is_active && isPointInHazardZone(currentLocation, zone))
+
+    if (!activeZone || warnedHazardIdRef.current === activeZone.id) {
+      return
+    }
+
+    warnedHazardIdRef.current = activeZone.id
+    toast.error(`You are inside ${activeZone.name}. Follow responder guidance and avoid risky areas.`, {
+      id: `hazard-zone-${activeZone.id}`,
+      duration: 7000,
+    })
+  }, [currentLocation, hazardZones])
 
   useEffect(() => {
     const targets = {
@@ -2685,38 +2739,51 @@ function LandingPage() {
 
   return (
     <div className="relative isolate bg-white text-navy">
-      <nav
-        className="fixed left-0 right-0 top-0 z-[9999] border-b border-black/[.06] bg-white/90 backdrop-blur-md"
-      >
-        <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between px-4 md:px-6">
-          <Link to="/" className="max-w-[175px]">
-            <BrandMark />
+      <nav className="landing-nav fixed left-0 right-0 top-0 z-[9999] border-b border-black/[.06] bg-white/90 backdrop-blur-md">
+        <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center justify-between gap-2 px-3 sm:px-4 md:h-20 md:px-6">
+          <Link to="/" className="flex min-w-0 shrink items-center">
+            <BrandMark
+              showTagline={false}
+              imageClassName="max-h-12 max-w-[150px] sm:max-h-14 sm:max-w-[190px] md:max-h-16 md:max-w-[220px]"
+            />
           </Link>
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
+            <LanguageSwitcher className="hidden sm:inline-flex" />
+            <Link
+              to="/sos"
+              aria-label="Open SOS panic button"
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-danger/25 bg-danger/10 px-2.5 text-sm font-semibold text-danger hover:border-danger sm:px-4"
+            >
+              <Siren className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('SOS')}</span>
+            </Link>
             <Link
               to={reportHref}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white hover:bg-[#be2136]"
+              className="inline-flex h-10 min-w-0 items-center justify-center gap-1.5 rounded-xl bg-danger px-3 text-sm font-semibold text-white hover:bg-[#be2136] sm:px-4"
             >
-              Report Emergency
-              <ArrowRight className="h-4 w-4" />
+              <span className="truncate">
+                <span className="sm:hidden">{t('Report')}</span>
+                <span className="hidden sm:inline">{t('Report')} {t('Emergency')}</span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0" />
             </Link>
-            <Link to="/login" className="inline-flex items-center gap-1 text-sm font-semibold text-navy hover:text-danger">
+            <Link to="/login" aria-label="Login" className="inline-flex h-10 shrink-0 items-center gap-1 rounded-xl px-1.5 text-sm font-semibold text-navy hover:text-danger sm:px-0">
               <LogIn className="h-4 w-4" />
-              Login
+              <span className="hidden sm:inline">Login</span>
             </Link>
           </div>
         </div>
       </nav>
 
       {!isOnline && (
-        <div className="fixed left-0 right-0 top-14 z-[9998] bg-warning/90 px-4 py-2 text-center text-sm font-semibold text-navy backdrop-blur-sm">
+        <div className="fixed left-0 right-0 top-16 z-[9998] bg-warning/90 px-3 py-2 text-center text-xs font-semibold text-navy backdrop-blur-sm sm:px-4 sm:text-sm md:top-20">
           <WifiOff className="mb-0.5 mr-1 inline-block h-4 w-4" />
           You are offline. Reports will be queued and sent when connection is restored. Call the hotline for emergencies.
         </div>
       )}
 
       <section
-        className="relative h-screen min-h-[700px] w-full overflow-hidden pt-14"
+        className="relative h-[100svh] min-h-[640px] w-full overflow-hidden pt-16 md:min-h-[700px] md:pt-20"
       >
         <MapContainer
           center={MAP_CENTER}
@@ -2738,6 +2805,7 @@ function LandingPage() {
             positions={VALENCIA_CITY_BOUNDARY}
             pathOptions={boundaryStyle}
           />
+          <HazardLayer zones={hazardZones} translateLabels />
           {mapIncidents.map((item) => (
             <Marker
               key={item.id}
@@ -2748,24 +2816,44 @@ function LandingPage() {
                 <div className="w-56 space-y-2">
                   <div className="flex items-center gap-2">
                     <LandingTypeBadge type={item.type} />
-                    <StatusPill status={item.status} />
+                    <StatusPill status={item.status} translate />
                   </div>
                   <p className="text-sm text-slate-700">{item.address_label}</p>
                   <p className="text-xs text-slate-500">{timeAgo(item.created_at)}</p>
+                  <CrowdsourceButtons incident={item} currentLocation={currentLocation} />
                 </div>
               </Popup>
             </Marker>
           ))}
         </MapContainer>
 
-        <div className="pointer-events-auto absolute bottom-4 left-4 right-4 z-[1000] lg:hidden">
-          <div className="rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card backdrop-blur">
-            <div className="flex items-center justify-between">
-              <div>
+        <div className="pointer-events-auto absolute bottom-24 left-6 z-[1000] hidden w-56 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-card backdrop-blur lg:block">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Hazard Zones</p>
+          <p className="mt-1 text-sm font-semibold text-navy">{hazardZones.filter((zone) => zone.is_active).length} active on map</p>
+          <div className="mt-3 space-y-2 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-sm border-2 border-[#B91C1C] bg-[#DC2626]/50" />
+              Danger zones
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-sm border-2 border-[#0369A1] bg-[#0BA5EC]/50" />
+              Flood-prone areas
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="h-3 w-3 rounded-sm border-2 border-[#047857] bg-[#10B981]/50" />
+              Evacuation centers
+            </div>
+          </div>
+        </div>
+
+        <div className="pointer-events-auto absolute bottom-3 left-3 right-3 z-[1000] sm:bottom-4 sm:left-4 sm:right-4 lg:hidden">
+          <div className="landing-mobile-panel max-h-[52svh] overflow-y-auto rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-card backdrop-blur sm:max-h-[58svh] sm:p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-danger">RescueLink</p>
-                <p className="text-sm font-semibold text-navy">Real-time Emergency Map</p>
+                <p className="truncate text-sm font-semibold text-navy">Real-time Emergency Map</p>
               </div>
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-success">
+              <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold text-success">
                 <span className="h-2 w-2 rounded-full bg-success landing-live-dot" />
                 LIVE
               </span>
@@ -2780,7 +2868,7 @@ function LandingPage() {
               <div className="rounded-lg bg-panel px-2 py-2 text-success">
                 {animatedStats.total_resolved}
                 <br />
-                Resolved
+                {t('Resolved')}
               </div>
               <div className="rounded-lg bg-panel px-2 py-2 text-danger">
                 {animatedStats.active_today}
@@ -2791,23 +2879,23 @@ function LandingPage() {
 
             <div className="mt-3 rounded-xl border border-slate-200 bg-white p-3">
               <div className="flex items-center gap-2">
-                <Phone className="h-4 w-4 text-danger" />
-                <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Emergency Hotline</span>
+                <Phone className="h-4 w-4 shrink-0 text-danger" />
+                <span className="min-w-0 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 sm:tracking-[0.18em]">{t('Emergency')} Hotline</span>
               </div>
               <a
                 href={`tel:${hotline.replace(/\D/g, '')}`}
-                className="mt-1 block text-base font-bold text-danger hover:underline"
+                className="mt-1 block break-words text-base font-bold text-danger hover:underline"
               >
                 {hotline}
               </a>
             </div>
 
             <details className="mt-3 group">
-              <summary className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-navy">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-navy">
                 Live Incident Feed
-                <span className="text-[10px] font-semibold text-slate-500">Tap to view</span>
+                <span className="shrink-0 text-[10px] font-semibold text-slate-500">Tap to view</span>
               </summary>
-              <div className="mt-2 max-h-[40vh] space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2">
+              <div className="mt-2 max-h-[32svh] space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2 sm:max-h-[40vh]">
                 {recentIncidents.length > 0 ? (
                   recentIncidents.map((item) => {
                     return (
@@ -2817,7 +2905,7 @@ function LandingPage() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <LandingTypeBadge type={item.type} />
-                          <StatusPill status={item.status} size="sm" />
+                          <StatusPill status={item.status} size="sm" translate />
                         </div>
                         <p className="truncate text-[11px] text-slate-600">{item.address_label}</p>
                         <p className="mt-1 text-[10px] text-slate-500">{timeAgo(item.created_at)}</p>
@@ -2848,15 +2936,15 @@ function LandingPage() {
 
             <Link
               to={reportHref}
-              className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2.5 text-sm font-semibold text-white"
+              className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2.5 text-sm font-semibold text-white"
             >
-              Report Emergency
+              {t('Report')} {t('Emergency')}
             </Link>
           </div>
         </div>
 
         <div
-          className="pointer-events-auto absolute left-6 top-1/2 z-[1000] hidden w-72 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white/95 p-6 shadow-card lg:block"
+          className="pointer-events-auto absolute left-4 top-1/2 z-[1000] hidden w-64 -translate-y-1/2 rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-card lg:block xl:left-6 xl:w-72 xl:p-6"
         >
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-danger">RescueLink</p>
           <h1 className="mt-3 font-heading text-3xl italic leading-tight text-navy">Real-time Emergency Map</h1>
@@ -2864,7 +2952,7 @@ function LandingPage() {
 
           <div className="mt-5 space-y-2 rounded-xl bg-panel px-4 py-3">
             <p className="text-sm font-semibold text-navy">{animatedStats.total_reported} Reports Today</p>
-            <p className="text-sm font-semibold text-success">{animatedStats.total_resolved} Resolved</p>
+            <p className="text-sm font-semibold text-success">{animatedStats.total_resolved} {t('Resolved')}</p>
             <p className="text-sm font-semibold text-danger">{animatedStats.active_today} Active</p>
           </div>
 
@@ -2872,7 +2960,7 @@ function LandingPage() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Phone className="h-4 w-4 text-danger" />
-                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Emergency Hotline</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{t('Emergency')} Hotline</span>
               </div>
             </div>
             <a
@@ -2887,14 +2975,14 @@ function LandingPage() {
             to={reportHref}
             className="mt-5 inline-flex w-full items-center justify-center gap-1.5 rounded-xl bg-danger px-4 py-2.5 text-sm font-semibold text-white"
           >
-            Report an Emergency
+            {t('Report')} {t('Emergency')}
             <ArrowRight className="h-4 w-4" />
           </Link>
           <p className="mt-3 text-center text-xs text-slate-500">Free. Fast. Official.</p>
         </div>
 
         <aside
-          className="pointer-events-auto absolute right-6 top-6 z-[1000] hidden w-64 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-card lg:block"
+          className="pointer-events-auto absolute right-4 top-5 z-[1000] hidden w-60 overflow-hidden rounded-xl border border-slate-200 bg-white/95 shadow-card lg:block xl:right-6 xl:top-6 xl:w-64"
         >
           <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2.5">
             <p className="text-sm font-semibold text-navy">Live Incident Feed</p>
@@ -2903,7 +2991,7 @@ function LandingPage() {
               LIVE
             </span>
           </div>
-          <div className="max-h-[calc(100vh-180px)] space-y-1.5 overflow-y-auto p-1.5" style={{ scrollBehavior: 'smooth' }}>
+          <div className="max-h-[calc(100svh-180px)] space-y-1.5 overflow-y-auto p-1.5" style={{ scrollBehavior: 'smooth' }}>
             {recentIncidents.length > 0 ? (
               recentIncidents.map((item) => {
                 return (
@@ -2913,7 +3001,7 @@ function LandingPage() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <LandingTypeBadge type={item.type} />
-                      <StatusPill status={item.status} size="sm" />
+                      <StatusPill status={item.status} size="sm" translate />
                     </div>
                     <p className="truncate text-[11px] text-slate-600">{item.address_label}</p>
                     <p className="mt-1 text-[10px] text-slate-500">{timeAgo(item.created_at)}</p>
@@ -2927,7 +3015,7 @@ function LandingPage() {
         </aside>
 
         <div
-          className="pointer-events-auto absolute bottom-6 left-6 z-[1000] hidden rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card lg:block"
+          className="pointer-events-auto absolute bottom-5 left-4 z-[1000] hidden max-w-60 rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-card lg:block xl:bottom-6 xl:left-6"
         >
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Map Style</p>
           <select
@@ -2946,11 +3034,11 @@ function LandingPage() {
 
       </section>
 
-      <section className="bg-white px-4 py-16 md:px-6 md:py-20">
+      <section className="bg-white px-4 py-12 sm:py-16 md:px-6 md:py-20">
         <div className="mx-auto max-w-6xl">
           <div className="mb-10">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-danger">Capabilities</p>
-            <h2 className="mt-2 font-heading text-3xl italic text-navy md:text-4xl">Powerful Features</h2>
+            <h2 className="mt-2 font-heading text-3xl italic text-navy sm:text-4xl">Powerful Features</h2>
             <p className="mt-2 max-w-2xl text-slate-600">Everything you need to report and track emergencies in real-time.</p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -2973,11 +3061,11 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="bg-panel px-4 py-16 md:px-6 md:py-20">
+      <section className="bg-panel px-4 py-12 sm:py-16 md:px-6 md:py-20">
         <div className="mx-auto max-w-6xl">
           <div className="mb-10">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-success">Process</p>
-            <h2 className="mt-2 font-heading text-3xl italic text-navy md:text-4xl">How It Works</h2>
+            <h2 className="mt-2 font-heading text-3xl italic text-navy sm:text-4xl">How It Works</h2>
             <p className="mt-2 max-w-2xl text-slate-600">Simple steps to get help when you need it most.</p>
           </div>
           <div className="grid gap-3 sm:grid-cols-3 md:grid-cols-5">
@@ -2996,9 +3084,9 @@ function LandingPage() {
         </div>
       </section>
 
-      <section className="bg-navy px-4 py-20 text-white md:px-6">
+      <section className="bg-navy px-4 py-14 text-white sm:py-20 md:px-6">
         <div className="mx-auto max-w-4xl text-center">
-          <p className="font-heading text-5xl italic">Every second counts.</p>
+          <p className="font-heading text-4xl italic sm:text-5xl">Every second counts.</p>
           <p className="mt-3 text-sm text-slate-200">Be the first to report. Help save lives in Valencia City.</p>
           <Link
             to="/register"
@@ -3012,11 +3100,11 @@ function LandingPage() {
 
       <footer className="border-t border-slate-200 bg-white px-4 py-6 md:px-6">
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-3 text-sm text-slate-600 md:flex-row md:items-center">
-          <div className="inline-flex items-center gap-2">
-            <Siren className="h-4 w-4 text-danger" />
+          <div className="inline-flex max-w-full items-start gap-2 sm:items-center">
+            <Siren className="mt-0.5 h-4 w-4 shrink-0 text-danger sm:mt-0" />
             <span>Official system of CDRRMO Valencia City, Bukidnon</span>
           </div>
-          <div className="inline-flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <span>© 2025</span>
             <span>Contact</span>
             <span>Privacy Policy</span>

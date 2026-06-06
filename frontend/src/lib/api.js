@@ -3,26 +3,58 @@ import { getAuthState } from './authStorage'
 
 function inferApiBaseUrl() {
   if (typeof window === 'undefined') {
-    return 'http://127.0.0.1:8000'
+    return ''
   }
 
-  return window.location.origin
+  return ''
 }
 
 function resolveApiBaseUrl() {
-  if (import.meta.env.DEV) {
-    return inferApiBaseUrl()
-  }
-
-  return import.meta.env.VITE_API_BASE_URL ?? inferApiBaseUrl()
+  return import.meta.env.VITE_API_BASE_URL?.trim() || inferApiBaseUrl()
 }
 
 export const API_BASE_URL = resolveApiBaseUrl()
 
+const GET_CACHE_TTL_MS = 10000
+const getCache = new Map()
+const pendingGetRequests = new Map()
+
+function stableStringify(value) {
+  if (!value || typeof value !== 'object') {
+    return String(value ?? '')
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
+
+  return Object.keys(value)
+    .sort()
+    .map((key) => `${key}:${stableStringify(value[key])}`)
+    .join('|')
+}
+
+function cacheKeyFor(url, config = {}) {
+  const { token } = getAuthState()
+  const params = config.params ? stableStringify(config.params) : ''
+  const authScope = token ? token.slice(0, 16) : 'guest'
+
+  return `${authScope}:${url}?${params}`
+}
+
+function isCacheableGet(config = {}) {
+  return config.cache !== false && !config.responseType && !config.signal
+}
+
+export function clearApiCache() {
+  getCache.clear()
+  pendingGetRequests.clear()
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
-  withCredentials: true,
-  withXSRFToken: true,
+  withCredentials: false,
+  withXSRFToken: false,
   xsrfCookieName: 'XSRF-TOKEN',
   xsrfHeaderName: 'X-XSRF-TOKEN',
   headers: {
@@ -41,8 +73,67 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      clearApiCache()
+    }
+
+    return Promise.reject(error)
+  },
+)
+
+const rawGet = api.get.bind(api)
+api.get = (url, config = {}) => {
+  if (!isCacheableGet(config)) {
+    return rawGet(url, config)
+  }
+
+  const ttl = Number(config.cacheTtl ?? GET_CACHE_TTL_MS)
+  const key = cacheKeyFor(url, config)
+  const cached = getCache.get(key)
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return Promise.resolve({
+      ...cached.response,
+      data: typeof structuredClone === 'function' ? structuredClone(cached.response.data) : cached.response.data,
+    })
+  }
+
+  if (pendingGetRequests.has(key)) {
+    return pendingGetRequests.get(key)
+  }
+
+  const request = rawGet(url, config)
+    .then((response) => {
+      getCache.set(key, {
+        expiresAt: Date.now() + ttl,
+        response,
+      })
+
+      return response
+    })
+    .finally(() => {
+      pendingGetRequests.delete(key)
+    })
+
+  pendingGetRequests.set(key, request)
+
+  return request
+}
+
+;['post', 'put', 'patch', 'delete'].forEach((method) => {
+  const rawMethod = api[method].bind(api)
+
+  api[method] = (...args) => rawMethod(...args).then((response) => {
+    clearApiCache()
+    return response
+  })
+})
+
 export async function ensureCsrfCookie() {
-  await api.get('/sanctum/csrf-cookie')
+  return Promise.resolve()
 }
 
 export function resolveApiUrl(path) {

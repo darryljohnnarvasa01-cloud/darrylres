@@ -19,6 +19,11 @@ export const NOTIFICATION_PREFERENCE_OPTIONS = [
     label: 'New Registration',
     description: 'Fresh citizen account submissions awaiting admin approval.',
   },
+  {
+    key: 'broadcast_message',
+    label: 'Broadcast',
+    description: 'Announcements sent through the broadcast alert workflow.',
+  },
 ]
 
 export const DEFAULT_NOTIFICATION_PREFERENCES = Object.freeze(
@@ -107,6 +112,10 @@ export function classifyNotificationEntry(notification) {
     return 'broadcast_message'
   }
 
+  if (text.includes('new message') || link.includes('conversation=')) {
+    return 'message'
+  }
+
   if (link.includes('/admin/registrations') || text.includes('registration')) {
     return 'new_registration'
   }
@@ -157,6 +166,11 @@ export function notificationTypeMeta(type) {
       return {
         label: 'Broadcast',
         badgeClass: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+      }
+    case 'message':
+      return {
+        label: 'Message',
+        badgeClass: 'border-sky-200 bg-sky-50 text-sky-700',
       }
     default:
       return {

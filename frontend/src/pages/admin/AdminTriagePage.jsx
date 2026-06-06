@@ -1,6 +1,6 @@
 import { closestCorners, DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from '@dnd-kit/core'
 import { AlertTriangle, ArrowRight, Clock3, Filter, GripVertical, RefreshCw, UserCircle2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
 import useSWR from 'swr'
 import AdminSearchField from '../../components/admin/AdminSearchField'
@@ -14,6 +14,7 @@ import { getIncidentType } from '../../data/incidentTypes'
 import { timeAgo } from '../../lib/datetime'
 import { parseApiError } from '../../lib/errorUtils'
 import { api } from '../../lib/api'
+import { useDebouncedValue } from '../../hooks/useDebouncedValue'
 
 const BOARD_COLUMNS = [
   {
@@ -60,10 +61,10 @@ const STATUS_TO_COLUMN = BOARD_COLUMNS.reduce((map, column) => {
   return map
 }, {})
 
-const swrFetcher = (path) => api.get(path).then((response) => response.data?.data ?? {})
+const swrFetcher = (path) => api.get(path, { cacheTtl: 30000 }).then((response) => response.data?.data ?? {})
 
 async function triageBoardFetcher() {
-  return api.get('/api/v1/admin/incidents/triage-board').then((response) => response.data?.data ?? {})
+  return api.get('/api/v1/admin/incidents/triage-board', { cacheTtl: 10000 }).then((response) => response.data?.data ?? {})
 }
 
 function getIncidentCode(incident) {
@@ -193,7 +194,7 @@ function ColumnSkeleton() {
   )
 }
 
-function BoardColumn({ column, count, children }) {
+const BoardColumn = memo(function BoardColumn({ column, count, children }) {
   const { isOver, setNodeRef } = useDroppable({
     id: column.id,
   })
@@ -217,9 +218,9 @@ function BoardColumn({ column, count, children }) {
       <div className="mt-4 flex-1 min-h-0 space-y-3 overflow-y-auto pr-1">{children}</div>
     </section>
   )
-}
+})
 
-function IncidentCard({ incident, isDragging, disabled, onOpenDetail, dragHandleProps }) {
+const IncidentCard = memo(function IncidentCard({ incident, isDragging, disabled, onOpenDetail, dragHandleProps }) {
   const type = getIncidentType(incident.type)
   const Icon = type.icon
   const urgent = isUrgentIncident(incident)
@@ -299,9 +300,9 @@ function IncidentCard({ incident, isDragging, disabled, onOpenDetail, dragHandle
       )}
     </article>
   )
-}
+})
 
-function DraggableIncidentCard({ incident, disabled, onOpenDetail }) {
+const DraggableIncidentCard = memo(function DraggableIncidentCard({ incident, disabled, onOpenDetail }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: incident.id,
     disabled,
@@ -324,7 +325,7 @@ function DraggableIncidentCard({ incident, disabled, onOpenDetail }) {
       />
     </div>
   )
-}
+})
 
 function AdminTriagePage() {
   const { user, logout } = useAuth()
@@ -339,6 +340,7 @@ function AdminTriagePage() {
   const [activeIncidentId, setActiveIncidentId] = useState(null)
   const [selectedIncidentId, setSelectedIncidentId] = useState(null)
   const [transitioningIncidentId, setTransitioningIncidentId] = useState(null)
+  const debouncedSearch = useDebouncedValue(filters.search, 250)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const {
@@ -348,8 +350,9 @@ function AdminTriagePage() {
     isValidating: incidentsValidating,
     mutate: mutateIncidents,
   } = useSWR('triage-board-incidents', triageBoardFetcher, {
+    dedupingInterval: 10000,
     refreshInterval: 30000,
-    revalidateOnFocus: true,
+    revalidateOnFocus: false,
   })
   const { data: staffPayload } = useSWR(selectedIncidentId ? '/api/v1/admin/staff' : null, swrFetcher)
   const {
@@ -428,7 +431,7 @@ function AdminTriagePage() {
   )
 
   const triageIncidents = useMemo(() => {
-    const normalizedSearch = filters.search.trim().toLowerCase()
+    const normalizedSearch = debouncedSearch.trim().toLowerCase()
     const matchesDateRange = (incident) => {
       const incidentDate = new Date(incident.created_at)
 
@@ -471,7 +474,7 @@ function AdminTriagePage() {
       })
       .filter(matchesDateRange)
       .sort((left, right) => new Date(right.created_at).getTime() - new Date(left.created_at).getTime())
-  }, [filters.barangay, filters.fromDate, filters.search, filters.toDate, filters.type, incidents])
+  }, [debouncedSearch, filters.barangay, filters.fromDate, filters.toDate, filters.type, incidents])
 
   const groupedIncidents = useMemo(
     () => BOARD_COLUMNS.reduce((groups, column) => {
@@ -486,18 +489,18 @@ function AdminTriagePage() {
     [activeIncidentId, triageIncidents],
   )
 
-  const openIncident = (incidentId) => {
+  const openIncident = useCallback((incidentId) => {
     setSelectedIncidentId(incidentId)
-  }
+  }, [])
 
-  const refreshBoard = async () => {
+  const refreshBoard = useCallback(async () => {
     await Promise.all([
       mutateIncidents(),
       selectedIncidentId ? mutateIncidentDetail() : Promise.resolve(),
     ])
-  }
+  }, [mutateIncidentDetail, mutateIncidents, selectedIncidentId])
 
-  const verifyIncident = async (incidentId, staffId) => {
+  const verifyIncident = useCallback(async (incidentId, staffId) => {
     try {
       await api.patch(`/api/v1/admin/incidents/${incidentId}/verify`, {
         assigned_staff_id: staffId,
@@ -507,9 +510,9 @@ function AdminTriagePage() {
     } catch (error) {
       toast.error(parseApiError(error).message)
     }
-  }
+  }, [refreshBoard])
 
-  const rejectIncident = async (incidentId, reason) => {
+  const rejectIncident = useCallback(async (incidentId, reason) => {
     try {
       await api.patch(`/api/v1/admin/incidents/${incidentId}/reject`, {
         rejection_reason: reason,
@@ -519,9 +522,9 @@ function AdminTriagePage() {
     } catch (error) {
       toast.error(parseApiError(error).message)
     }
-  }
+  }, [refreshBoard])
 
-  const progressIncident = async (incident, nextStatus, successMessage) => {
+  const progressIncident = useCallback(async (incident, nextStatus, successMessage) => {
     setTransitioningIncidentId(incident.id)
 
     try {
@@ -537,9 +540,9 @@ function AdminTriagePage() {
     } finally {
       setTransitioningIncidentId(null)
     }
-  }
+  }, [refreshBoard])
 
-  const handleDragEnd = async (event) => {
+  const handleDragEnd = useCallback(async (event) => {
     setActiveIncidentId(null)
 
     const incident = triageIncidents.find((item) => item.id === event.active?.id)
@@ -567,7 +570,7 @@ function AdminTriagePage() {
     }
 
     await progressIncident(incident, action.status, action.successMessage)
-  }
+  }, [openIncident, progressIncident, triageIncidents])
 
   return (
     <div className="admin-shell min-h-screen bg-panel">

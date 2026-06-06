@@ -6,9 +6,17 @@ use App\Events\IotSmokeAlert;
 use App\Events\NotificationCreated;
 use App\Models\Notification;
 use App\Models\User;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
-class NotifyAdminsOfIotAlert
+class NotifyAdminsOfIotAlert implements ShouldQueue
 {
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public int $backoff = 5;
+
     public function handle(IotSmokeAlert $event): void
     {
         $incidentId = (string) ($event->payload['incident_id'] ?? '');

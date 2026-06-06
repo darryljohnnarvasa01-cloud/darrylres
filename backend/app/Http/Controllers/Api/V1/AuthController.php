@@ -6,6 +6,7 @@ use App\Events\RegistrationSubmitted;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Http\Requests\Auth\RegisterRequest;
+use App\Models\Sanctum\PersonalAccessToken;
 use App\Models\User;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
@@ -23,7 +24,8 @@ class AuthController extends Controller
 
         $govIdFile = $request->file('gov_id_image');
         $filename = Str::uuid()->toString().'.'.$govIdFile->getClientOriginalExtension();
-        $storedPath = Storage::disk('private')->putFileAs('gov_ids', $govIdFile, $filename);
+        $storedPath = Storage::disk(config('filesystems.government_id_disk', 'private'))
+            ->putFileAs('gov_ids', $govIdFile, $filename);
 
         $user = User::create([
             'full_name' => $validated['full_name'],
@@ -70,12 +72,18 @@ class AuthController extends Controller
             return $this->errorResponse("Account was rejected: {$reason}", [], 403);
         }
 
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $newToken = $user->createToken('auth_token');
+        $token = $newToken->plainTextToken;
+
+        if ($newToken->accessToken instanceof PersonalAccessToken) {
+            $newToken->accessToken->setRelation('tokenable', $user);
+            PersonalAccessToken::rememberPlainTextToken($token, $newToken->accessToken);
+        }
 
         return $this->successResponse([
             'user' => $this->serializeUser($user),
             'token' => $token,
-            'role' => $user->role,
+            'role' => $this->clientRole($user),
         ], 'Login successful.');
     }
 
@@ -85,12 +93,14 @@ class AuthController extends Controller
 
         return $this->successResponse([
             'user' => $this->serializeUser($user),
-            'role' => $user->role,
+            'role' => $this->clientRole($user),
         ], 'Authenticated user retrieved successfully.');
     }
 
     public function logout(Request $request)
     {
+        PersonalAccessToken::forgetPlainTextToken($request->bearerToken());
+
         $request->user()?->currentAccessToken()?->delete();
 
         return $this->successResponse([], 'Logged out successfully.');
@@ -105,10 +115,29 @@ class AuthController extends Controller
             'phone' => $user->phone,
             'address' => $user->address,
             'barangay' => $user->barangay,
-            'role' => $user->role,
+            'role' => $this->clientRole($user),
+            'actual_role' => $user->role,
+            'admin_role' => $user->adminRole ? [
+                'id' => $user->adminRole->id,
+                'name' => $user->adminRole->name,
+            ] : null,
             'status' => $user->status,
             'permissions' => $user->permissionList(),
             'permission_map' => $user->permissionMap(),
+            'is_volunteer' => (bool) $user->is_volunteer,
+            'volunteer_skills' => is_array($user->volunteer_skills) ? $user->volunteer_skills : [],
+            'volunteer_availability' => (bool) $user->volunteer_availability,
         ];
+    }
+
+    private function clientRole(User $user): string
+    {
+        // If user is actually an admin, return admin regardless of fallback logic
+        if ($user->role === 'admin') {
+            return 'admin';
+        }
+
+        // Use fallback access for staff when no admins exist
+        return $user->canUseFallbackAdminAccess() ? 'admin' : $user->role;
     }
 }

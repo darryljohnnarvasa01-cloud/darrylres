@@ -1,4 +1,4 @@
-import { Bell, CheckCheck, CheckCircle2, Megaphone, Siren, TriangleAlert, UserPlus } from 'lucide-react'
+import { Bell, CheckCheck, CheckCircle2, Megaphone, MessageCircle, Siren, TriangleAlert, UserPlus } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -25,6 +25,8 @@ function iconForNotification(notification) {
       return CheckCircle2
     case 'broadcast_message':
       return Megaphone
+    case 'message':
+      return MessageCircle
     default:
       return TriangleAlert
   }
@@ -99,7 +101,9 @@ function NotificationBell({ size = 'md', align = 'right' }) {
       fetchNotifications()
     })
     channel.listen('.BroadcastAnnouncement', (payload) => {
-      if (role === 'staff') {
+      appendNotificationHistory(user, { ...payload, is_read: false })
+
+      if (role === 'staff' || role === 'citizen') {
         toast.success(payload?.title ?? 'Broadcast announcement received.')
       }
 

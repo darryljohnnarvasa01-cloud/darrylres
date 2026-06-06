@@ -52,9 +52,16 @@ class IncidentStatusUpdated implements ShouldBroadcastNow
      */
     public function broadcastOn(): array
     {
-        return [
+        $channels = [
             new PrivateChannel('admin.alerts'),
+            new PrivateChannel("incidents.{$this->payload['staff_id']}"),
         ];
+
+        if (! empty($this->payload['reporter_id'])) {
+            $channels[] = new PrivateChannel("incidents.{$this->payload['reporter_id']}");
+        }
+
+        return $channels;
     }
 
     public function broadcastWith(): array

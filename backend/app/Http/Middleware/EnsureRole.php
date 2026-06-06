@@ -25,7 +25,11 @@ class EnsureRole
             ], 401);
         }
 
-        if (! in_array($user->role, $roles, true)) {
+        $allowed = in_array($user->role, $roles, true)
+            || (in_array('admin', $roles, true) && $user->role === 'admin')
+            || (in_array('admin', $roles, true) && $user->canUseFallbackAdminAccess());
+
+        if (! $allowed) {
             return response()->json([
                 'success' => false,
                 'errors' => ['role' => ['Forbidden for this role.']],

@@ -1,20 +1,33 @@
-function BrandMark({ compact = false }) {
+function BrandMark({
+  compact = false,
+  className = '',
+  imageClassName = '',
+  showTagline = true,
+}) {
   if (compact) {
     return (
-      <div className="flex justify-center">
-        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-danger text-sm font-semibold uppercase tracking-[0.18em] text-white shadow-card">
-          RL
-        </div>
+      <div className={`flex justify-center ${className}`}>
+        <img
+          src="/logo.png"
+          alt="RescueLink"
+          className={`h-14 w-14 rounded-2xl object-contain shadow-card ${imageClassName}`}
+        />
       </div>
     )
   }
 
   return (
-    <div className="text-center">
-      <p className="font-heading text-4xl italic text-danger">RescueLink</p>
-      <p className="whitespace-nowrap text-xs font-medium uppercase tracking-[0.18em] text-navy/70">
-        CDRRMO Valencia City
-      </p>
+    <div className={`text-center ${className}`}>
+      <img
+        src="/logo.png"
+        alt="RescueLink"
+        className={`mx-auto h-auto max-h-32 w-auto max-w-[240px] object-contain ${imageClassName}`}
+      />
+      {showTagline && (
+        <p className="mt-2 whitespace-nowrap text-xs font-medium uppercase tracking-[0.18em] text-navy/70">
+          CDRRMO Valencia City
+        </p>
+      )}
     </div>
   )
 }

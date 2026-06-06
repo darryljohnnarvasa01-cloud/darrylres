@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Incident;
 use App\Models\IotDevice;
 use App\Models\User;
+use App\Services\GoogleDriveBackupService;
 use App\Support\ApiResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -22,6 +23,7 @@ class SystemController extends Controller
         $cache = $this->cacheStatus();
         $broadcast = $this->broadcastStatus();
         $storage = $this->storageStatus();
+        $googleDrive = app(GoogleDriveBackupService::class)->configurationStatus();
 
         $services = [
             'database' => $database,
@@ -29,6 +31,10 @@ class SystemController extends Controller
             'cache' => $cache,
             'broadcast' => $broadcast,
             'storage' => $storage,
+            'google_drive' => [
+                'ok' => $googleDrive['configured'],
+                ...$googleDrive,
+            ],
         ];
 
         $overallHealthy = collect($services)
@@ -42,6 +48,28 @@ class SystemController extends Controller
             'services' => $services,
             'totals' => $this->totals($database['ok']),
         ], 'System health retrieved successfully.');
+    }
+
+    public function googleDriveAuthUrl(GoogleDriveBackupService $backupService)
+    {
+        try {
+            return $this->successResponse([
+                'auth_url' => $backupService->authUrl(),
+            ], 'Google Drive authorization URL generated successfully.');
+        } catch (Throwable $exception) {
+            return $this->errorResponse($exception->getMessage(), [], 422);
+        }
+    }
+
+    public function googleDriveBackup(GoogleDriveBackupService $backupService)
+    {
+        try {
+            return $this->successResponse([
+                'backup' => $backupService->backup(),
+            ], 'Google Drive backup completed successfully.');
+        } catch (Throwable $exception) {
+            return $this->errorResponse($exception->getMessage(), [], 422);
+        }
     }
 
     /**

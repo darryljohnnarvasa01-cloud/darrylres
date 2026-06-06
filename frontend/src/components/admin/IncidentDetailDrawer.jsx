@@ -58,13 +58,14 @@ function IncidentDetailDrawer({
   const [assignedStaffId, setAssignedStaffId] = useState('')
   const [rejectionReason, setRejectionReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const incidentLogs = incident?.logs
 
   const sortedLogs = useMemo(() => {
-    if (!Array.isArray(incident?.logs)) {
+    if (!Array.isArray(incidentLogs)) {
       return []
     }
 
-    return [...incident.logs].sort((left, right) => {
+    return [...incidentLogs].sort((left, right) => {
       const leftTime = Date.parse(left.created_at ?? '')
       const rightTime = Date.parse(right.created_at ?? '')
 
@@ -74,7 +75,7 @@ function IncidentDetailDrawer({
 
       return String(right.created_at ?? '').localeCompare(String(left.created_at ?? ''))
     })
-  }, [incident?.logs])
+  }, [incidentLogs])
 
   const isPending = incident?.status === 'pending_verification'
   const latestAssignment = incident?.assignments?.[0]

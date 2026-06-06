@@ -15,7 +15,11 @@ class ForceHttps
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (app()->isProduction() && ! $request->secure()) {
+        $host = $request->getHost();
+        $isLocalHost = in_array($host, ['127.0.0.1', 'localhost', '::1'], true);
+        $forceHttps = filter_var(env('FORCE_HTTPS', app()->isProduction()), FILTER_VALIDATE_BOOL);
+
+        if ($forceHttps && ! $isLocalHost && ! $request->secure()) {
             return redirect()->secure($request->getRequestUri());
         }
 

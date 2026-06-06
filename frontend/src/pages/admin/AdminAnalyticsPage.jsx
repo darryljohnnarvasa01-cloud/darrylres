@@ -86,6 +86,12 @@ function formatMinutes(value) {
   return `${Number(value).toFixed(1)} min`
 }
 
+function formatRating(value) {
+  const rating = Number(value ?? 0)
+
+  return rating > 0 ? `${rating.toFixed(2)} / 5` : 'No ratings'
+}
+
 function KpiCard({ label, value, helper }) {
   return (
     <article className="rounded-3xl border border-slate-200 bg-white p-5 shadow-card">
@@ -301,6 +307,7 @@ function AdminAnalyticsPage() {
       ['Metric', 'Value'],
       ['Avg. Time to Verify', formatHours(kpis.avg_verification_hours)],
       ['Avg. Time to Resolve', formatHours(kpis.avg_resolution_hours)],
+      ['Avg. Citizen Rating', formatRating(kpis.avg_feedback_rating)],
       ['Incidents in Period', kpis.total_this_period ?? 0],
       ['Incidents in Previous Period', kpis.total_last_period ?? 0],
       ['Percent Change', `${kpis.pct_change ?? 0}%`],
@@ -465,9 +472,14 @@ function AdminAnalyticsPage() {
               {isLoading ? (
                 <LoadingGrid />
               ) : (
-                <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
                   <KpiCard label="Avg. Time to Verify" value={formatHours(kpis.avg_verification_hours)} />
                   <KpiCard label="Avg. Time to Resolve" value={formatHours(kpis.avg_resolution_hours)} />
+                  <KpiCard
+                    label="Citizen Rating"
+                    value={formatRating(kpis.avg_feedback_rating)}
+                    helper={`${kpis.feedback_count ?? 0} submitted rating${Number(kpis.feedback_count ?? 0) === 1 ? '' : 's'}`}
+                  />
                   <KpiCard
                     label="Period Volume"
                     value={kpis.total_this_period ?? 0}

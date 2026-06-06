@@ -1,15 +1,19 @@
-import { ArrowRight, LogOut, UserCircle2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Clock3, MapPin, RefreshCw, WifiOff } from 'lucide-react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+import { memo, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import toast from 'react-hot-toast'
-import BrandMark from '../../components/BrandMark'
 import StatusPill from '../../components/incident/StatusPill'
-import NotificationBell from '../../components/notifications/NotificationBell'
+import StaffHeader from '../../components/staff/StaffHeader'
 import { useAuth } from '../../context/AuthContext'
 import { getIncidentType } from '../../data/incidentTypes'
 import { api } from '../../lib/api'
 import { timeAgo } from '../../lib/datetime'
 import { parseApiError } from '../../lib/errorUtils'
+import { staffQueryKeys } from '../../lib/queryClient'
+import { useStaffOperationsStore } from '../../stores/staffOperationsStore'
+import { usePullToRefresh } from '../../hooks/useSwipeGestures'
+import { useDocumentTitle } from '../../hooks/useDocumentTitle'
 
 const STATUS_TABS = [
   { value: '', label: 'All' },
@@ -18,76 +22,178 @@ const STATUS_TABS = [
   { value: 'resolved', label: 'Resolved' },
 ]
 
+function fetchStaffIncidents({ status, page }) {
+  return api
+    .get('/api/v1/staff/incidents', {
+      params: {
+        status: status || undefined,
+        page,
+        per_page: 12,
+      },
+      cacheTtl: 15000,
+    })
+    .then((response) => response.data?.data?.incidents ?? { data: [], current_page: 1, last_page: 1 })
+}
+
+const DashboardSkeleton = memo(function DashboardSkeleton() {
+  return (
+    <div className="col-span-full grid gap-2 sm:gap-3 lg:grid-cols-2" aria-label="Loading assigned incidents">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="h-[92px] animate-pulse rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+          <div className="flex items-center gap-3">
+            <div className="h-11 w-11 rounded-full bg-slate-100" />
+            <div className="flex-1 space-y-2">
+              <div className="h-3 w-28 rounded bg-slate-100" />
+              <div className="h-3 w-3/4 rounded bg-slate-100" />
+            </div>
+            <div className="h-9 w-20 rounded-lg bg-slate-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+})
+
+const IncidentCard = memo(function IncidentCard({ incident }) {
+  const type = getIncidentType(incident.type)
+  const Icon = type.icon
+  const incidentCode = incident.reference_code ?? incident.id.slice(0, 8).toUpperCase()
+
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card transition hover:border-info/40 hover:shadow-lg">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border ${type.chipClass}`}>
+            <Icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{incidentCode}</p>
+              <StatusPill status={incident.status} size="sm" />
+            </div>
+            <p className="mt-1 truncate text-sm font-semibold text-navy">{type.label}</p>
+            <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-xs text-slate-600">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" aria-hidden="true" />
+              <span className="truncate">{incident.address_label}</span>
+            </p>
+            <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
+              <Clock3 className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+              {timeAgo(incident.incident_datetime ?? incident.created_at)} - Reporter: {incident.reporter?.full_name ?? 'Anonymous'}
+            </p>
+          </div>
+        </div>
+        <Link
+          to={`/staff/incidents/${incident.id}`}
+          aria-label={`Open incident ${incidentCode}`}
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-danger text-white transition hover:bg-[#bc1f34] focus:outline-none focus:ring-4 focus:ring-danger/20"
+        >
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </Link>
+      </div>
+    </article>
+  )
+})
+
 function StaffDashboardPage() {
-  const { user, logout } = useAuth()
-  const [activeTab, setActiveTab] = useState('')
-  const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(false)
-  const [incidents, setIncidents] = useState({
-    data: [],
-    current_page: 1,
-    last_page: 1,
+  useDocumentTitle('My Incidents')
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const activeTab = useStaffOperationsStore((state) => state.activeStatus)
+  const page = useStaffOperationsStore((state) => state.page)
+  const setActiveTab = useStaffOperationsStore((state) => state.setActiveStatus)
+  const setPage = useStaffOperationsStore((state) => state.setPage)
+
+  const queryKey = staffQueryKeys.incidents({ status: activeTab, page })
+  const {
+    data: incidents = { data: [], current_page: 1, last_page: 1 },
+    error,
+    isFetching,
+    isLoading,
+    refetch,
+  } = useQuery({
+    queryKey,
+    queryFn: () => fetchStaffIncidents({ status: activeTab, page }),
+    placeholderData: keepPreviousData,
+    refetchInterval: 30000,
   })
 
-  const fetchIncidents = useCallback(async () => {
-    setLoading(true)
-    try {
-      const response = await api.get('/api/v1/staff/incidents', {
-        params: {
-          status: activeTab || undefined,
-          page,
-          per_page: 10,
-        },
-      })
-      setIncidents(response.data?.data?.incidents ?? { data: [], current_page: 1, last_page: 1 })
-    } catch (error) {
-      toast.error(parseApiError(error).message)
-    } finally {
-      setLoading(false)
+  useEffect(() => {
+    if (error) {
+      toast.error(parseApiError(error).message, { id: 'staff-incidents-error' })
     }
-  }, [activeTab, page])
+  }, [error])
 
   useEffect(() => {
-    fetchIncidents()
-  }, [fetchIncidents])
+    const echo = window?.Echo
+
+    if (!echo || !user?.id) {
+      return undefined
+    }
+
+    const channelName = `incidents.${user.id}`
+    const channel = echo.private(channelName)
+    const revalidate = () => {
+      queryClient.invalidateQueries({ queryKey: ['staff', 'incidents'] })
+    }
+
+    channel.listen('.IncidentAssigned', revalidate)
+    channel.listen('.IncidentStatusUpdated', revalidate)
+
+    return () => echo.leave(`private-${channelName}`)
+  }, [queryClient, user?.id])
 
   const activeCount = useMemo(
     () => incidents.data.filter((item) => item.status !== 'resolved').length,
     [incidents.data],
   )
+  const currentPage = incidents.current_page ?? 1
+  const lastPage = incidents.last_page ?? 1
+
+  const { isPulling, pullDistance, pullHandlers } = usePullToRefresh({
+    onRefresh: async () => {
+      await refetch()
+    },
+  })
 
   return (
     <div className="min-h-screen bg-panel">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-2 px-4 py-2 sm:flex-row sm:items-center sm:justify-between md:px-6">
-          <div className="max-w-[180px]">
-            <BrandMark />
-          </div>
-          <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:justify-start">
-            <div className="hidden items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 md:inline-flex">
-              <UserCircle2 className="h-4 w-4 text-slate-500" />
-              <span className="text-xs font-semibold text-navy">{user?.full_name}</span>
+      <StaffHeader />
+
+      {isPulling && (
+        <div
+          className="fixed left-0 right-0 z-30 flex items-center justify-center bg-white/80 backdrop-blur-sm transition-all"
+          style={{ top: 0, height: `${Math.min(pullDistance, 80)}px` }}
+        >
+          <RefreshCw
+            className={`h-5 w-5 text-info ${pullDistance >= 80 ? 'animate-spin' : ''}`}
+            aria-hidden="true"
+          />
+          <span className="ml-2 text-xs font-semibold text-info">
+            {pullDistance >= 80 ? 'Release to refresh' : 'Pull to refresh'}
+          </span>
+        </div>
+      )}
+
+      <main
+        className="mx-auto w-full max-w-6xl space-y-4 px-4 py-4 pb-8 md:px-6"
+        {...pullHandlers}
+      >
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-lg font-semibold text-navy">My Assigned Incidents</h1>
+              <span className="inline-flex rounded-full bg-danger/10 px-2.5 py-0.5 text-[11px] font-semibold text-danger">
+                Active: {activeCount}
+              </span>
             </div>
             <button
               type="button"
-              onClick={logout}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-navy hover:border-danger hover:text-danger sm:min-h-12"
+              onClick={() => refetch()}
+              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-navy hover:border-info hover:text-info"
             >
-              <LogOut className="h-4 w-4" />
-              Logout
+              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} aria-hidden="true" />
+              Refresh
             </button>
-            <NotificationBell size="sm" align="right" />
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-6xl space-y-4 px-4 py-4 pb-8 md:px-6">
-        <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-lg font-semibold text-navy">My Assigned Incidents</h1>
-            <span className="inline-flex rounded-full bg-danger/10 px-2.5 py-0.5 text-[11px] font-semibold text-danger">
-              Active: {activeCount}
-            </span>
           </div>
           <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
             {STATUS_TABS.map((tab) => (
@@ -95,9 +201,9 @@ function StaffDashboardPage() {
                 key={tab.value || 'all'}
                 type="button"
                 onClick={() => {
-                  setPage(1)
                   setActiveTab(tab.value)
                 }}
+                aria-pressed={activeTab === tab.value}
                 className={`min-h-9 shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold sm:min-h-10 sm:px-4 sm:text-xs ${
                   activeTab === tab.value ? 'bg-danger text-white' : 'border border-slate-200 text-slate-600'
                 }`}
@@ -109,46 +215,13 @@ function StaffDashboardPage() {
         </section>
 
         <section className="grid gap-2 sm:gap-3 lg:grid-cols-2">
-          {loading ? (
-            <div className="col-span-full rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-              Loading assigned incidents...
-            </div>
+          {isLoading ? (
+            <DashboardSkeleton />
           ) : incidents.data.length > 0 ? (
-            incidents.data.map((incident) => {
-              const type = getIncidentType(incident.type)
-              const Icon = type.icon
-
-              return (
-                <article key={incident.id} className="h-20 overflow-hidden rounded-2xl border border-slate-200 bg-white p-2.5 shadow-card sm:h-auto sm:p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border sm:h-10 sm:w-10 ${type.chipClass}`}>
-                        <Icon className="h-4 w-4" />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold text-navy">{type.label}</p>
-                        <p className="hidden truncate text-[11px] text-slate-600 sm:block">{incident.address_label}</p>
-                        <p className="mt-0.5 hidden text-[10px] leading-tight text-slate-500 sm:block">
-                          {timeAgo(incident.incident_datetime ?? incident.created_at)} - Reporter: {incident.reporter?.full_name ?? 'Anonymous'}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <StatusPill status={incident.status} size="sm" />
-                      <Link
-                        to={`/staff/incidents/${incident.id}`}
-                        aria-label="Open incident"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-danger text-white hover:bg-[#bc1f34]"
-                      >
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </div>
-                  </div>
-                </article>
-              )
-            })
+            incidents.data.map((incident) => <IncidentCard key={incident.id} incident={incident} />)
           ) : (
             <div className="col-span-full rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+              <WifiOff className="mx-auto mb-3 h-8 w-8 text-slate-300" aria-hidden="true" />
               No assigned incidents found for this filter.
             </div>
           )}
@@ -156,13 +229,13 @@ function StaffDashboardPage() {
 
         <section className="flex flex-col items-start justify-between gap-2 rounded-2xl border border-slate-200 bg-white p-3 sm:flex-row sm:items-center">
           <p className="text-xs text-slate-500">
-            Page {incidents.current_page ?? 1} of {incidents.last_page ?? 1}
+            Page {currentPage} of {lastPage}
           </p>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-              disabled={(incidents.current_page ?? 1) <= 1}
+              disabled={currentPage <= 1 || isFetching}
               className="min-h-10 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-navy disabled:opacity-40 sm:min-h-12 sm:text-sm"
             >
               Previous
@@ -170,7 +243,7 @@ function StaffDashboardPage() {
             <button
               type="button"
               onClick={() => setPage((prev) => prev + 1)}
-              disabled={(incidents.current_page ?? 1) >= (incidents.last_page ?? 1)}
+              disabled={currentPage >= lastPage || isFetching}
               className="min-h-10 rounded-xl border border-slate-200 px-4 text-xs font-semibold text-navy disabled:opacity-40 sm:min-h-12 sm:text-sm"
             >
               Next

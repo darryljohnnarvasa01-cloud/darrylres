@@ -1,4 +1,4 @@
-import { Bell, CheckCheck, ExternalLink, RefreshCw, Send, Settings2, UserCircle2, Users } from 'lucide-react'
+import { Bell, CheckCheck, ExternalLink, MapPin, RefreshCw, Send, Settings2, UserCircle2, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
@@ -6,6 +6,7 @@ import useSWR from 'swr'
 import AdminSidebar from '../../components/admin/AdminSidebar'
 import NotificationBell from '../../components/notifications/NotificationBell'
 import { useAuth } from '../../context/AuthContext'
+import { VALENCIA_BARANGAYS } from '../../data/barangays'
 import { api } from '../../lib/api'
 import { formatDateTime, timeAgo } from '../../lib/datetime'
 import { parseApiError } from '../../lib/errorUtils'
@@ -76,6 +77,9 @@ function AdminNotificationsPage() {
   const [broadcastForm, setBroadcastForm] = useState({
     title: '',
     message: '',
+    target_type: 'staff',
+    target_barangay: '',
+    target_polygon: '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [lastBroadcast, setLastBroadcast] = useState(null)
@@ -213,21 +217,47 @@ function AdminNotificationsPage() {
 
   const handleBroadcast = async (event) => {
     event.preventDefault()
+
+    let targetPolygon = null
+
+    if (broadcastForm.target_type === 'polygon') {
+      try {
+        targetPolygon = JSON.parse(broadcastForm.target_polygon)
+      } catch {
+        toast.error('Enter a valid polygon JSON array before sending.')
+        return
+      }
+    }
+
     setSubmitting(true)
 
     try {
-      const response = await api.post('/api/v1/admin/broadcast', {
+      const requestPayload = {
         title: broadcastForm.title.trim(),
         message: broadcastForm.message.trim(),
-      })
+        target_type: broadcastForm.target_type,
+      }
 
-      const payload = response.data?.data ?? null
-      setLastBroadcast(payload)
+      if (broadcastForm.target_type === 'barangay') {
+        requestPayload.target_barangay = broadcastForm.target_barangay
+      }
+
+      if (broadcastForm.target_type === 'polygon') {
+        requestPayload.target_polygon = targetPolygon
+      }
+
+      const response = await api.post('/api/v1/admin/broadcast', requestPayload)
+
+      const responsePayload = response.data?.data ?? null
+      setLastBroadcast(responsePayload)
       setBroadcastForm({
         title: '',
         message: '',
+        target_type: 'staff',
+        target_barangay: '',
+        target_polygon: '',
       })
-      toast.success(payload?.recipients_count ? 'Broadcast sent to online staff.' : 'No online staff received the broadcast.')
+      toast.success(responsePayload?.recipients_count ? 'Broadcast sent successfully.' : 'No matching recipients received the broadcast.')
     } catch (requestError) {
       toast.error(parseApiError(requestError).message)
     } finally {
@@ -266,6 +296,18 @@ function AdminNotificationsPage() {
       toast.error(parseApiError(requestError).message)
     }
   }
+
+  const broadcastTargetReady = useMemo(() => {
+    if (broadcastForm.target_type === 'barangay') {
+      return Boolean(broadcastForm.target_barangay)
+    }
+
+    if (broadcastForm.target_type === 'polygon') {
+      return broadcastForm.target_polygon.trim().length > 0
+    }
+
+    return true
+  }, [broadcastForm.target_barangay, broadcastForm.target_polygon, broadcastForm.target_type])
 
   return (
     <div className="admin-shell min-h-screen bg-panel">
@@ -378,9 +420,9 @@ function AdminNotificationsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Broadcast Tool</p>
-                  <h2 className="mt-1 text-xl font-semibold text-navy">Send an announcement to online staff</h2>
+                  <h2 className="mt-1 text-xl font-semibold text-navy">Send a targeted broadcast alert</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Messages are delivered only to staff with recent authenticated activity and are pushed through Reverb.
+                    Messages can go to online staff or verified citizens filtered by barangay or geofence.
                   </p>
                 </div>
                 <div className="rounded-xl bg-panel px-3 py-2 text-xs text-slate-500">
@@ -416,6 +458,64 @@ function AdminNotificationsPage() {
                   />
                 </div>
 
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-navy">Target</label>
+                    <select
+                      value={broadcastForm.target_type}
+                      onChange={(event) =>
+                        setBroadcastForm((current) => ({
+                          ...current,
+                          target_type: event.target.value,
+                          target_barangay: '',
+                          target_polygon: '',
+                        }))
+                      }
+                      className="form-input"
+                    >
+                      <option value="staff">Online staff</option>
+                      <option value="all">All verified citizens</option>
+                      <option value="barangay">Citizens by barangay</option>
+                      <option value="polygon">Citizens in geofence</option>
+                    </select>
+                  </div>
+
+                  {broadcastForm.target_type === 'barangay' ? (
+                    <div>
+                      <label className="mb-1.5 block text-sm font-semibold text-navy">Barangay</label>
+                      <select
+                        value={broadcastForm.target_barangay}
+                        onChange={(event) =>
+                          setBroadcastForm((current) => ({ ...current, target_barangay: event.target.value }))
+                        }
+                        className="form-input"
+                      >
+                        <option value="">Select barangay</option>
+                        {VALENCIA_BARANGAYS.map((barangay) => (
+                          <option key={barangay} value={barangay}>{barangay}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+                </div>
+
+                {broadcastForm.target_type === 'polygon' ? (
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-navy">Geofence Polygon JSON</label>
+                    <textarea
+                      value={broadcastForm.target_polygon}
+                      onChange={(event) =>
+                        setBroadcastForm((current) => ({ ...current, target_polygon: event.target.value }))
+                      }
+                      className="form-input min-h-28 resize-none font-mono text-xs"
+                      placeholder='[{"lat":7.9042,"lng":125.0929},{"lat":7.9098,"lng":125.1012},{"lat":7.8991,"lng":125.1044}]'
+                    />
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      Citizens are matched by the latest incident location they reported inside this polygon.
+                    </p>
+                  </div>
+                ) : null}
+
                 <div className="rounded-2xl bg-panel p-4">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-navy">Recipient preview</p>
@@ -432,7 +532,7 @@ function AdminNotificationsPage() {
                     </button>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {onlineResponders.length ? (
+                    {broadcastForm.target_type === 'staff' && onlineResponders.length ? (
                       onlineResponders.slice(0, 8).map((responder) => (
                         <span
                           key={responder.id}
@@ -442,10 +542,17 @@ function AdminNotificationsPage() {
                           {responder.full_name}
                         </span>
                       ))
-                    ) : (
+                    ) : broadcastForm.target_type === 'staff' ? (
                       <p className="text-sm text-slate-500">
-                        No staff are currently marked online, so a broadcast would not be delivered right now.
+                        No staff are currently marked online, so a staff broadcast would not be delivered right now.
                       </p>
+                    ) : (
+                      <div className="flex items-start gap-2 text-sm text-slate-500">
+                        <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+                        <p>
+                          Matching citizens are calculated on send using the selected target.
+                        </p>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -457,6 +564,7 @@ function AdminNotificationsPage() {
                       submitting
                       || broadcastForm.title.trim().length < 4
                       || broadcastForm.message.trim().length < 10
+                      || !broadcastTargetReady
                     }
                     className="inline-flex items-center gap-2 rounded-xl bg-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                   >
@@ -471,7 +579,7 @@ function AdminNotificationsPage() {
                   <p className="text-sm font-semibold text-navy">{lastBroadcast.title}</p>
                   <p className="mt-1 text-sm text-slate-600">{lastBroadcast.message}</p>
                   <p className="mt-2 text-xs text-slate-500">
-                    Sent {timeAgo(lastBroadcast.sent_at)} to {lastBroadcast.recipients_count} online staff.
+                    Sent {timeAgo(lastBroadcast.sent_at)} to {lastBroadcast.recipients_count} matching recipients.
                   </p>
                 </div>
               ) : null}

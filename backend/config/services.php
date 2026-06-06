@@ -31,4 +31,25 @@ return [
         ],
     ],
 
+    'supabase' => [
+        'url' => env('SUPABASE_URL') ?: (env('SUPABASE_STORAGE_PUBLIC_URL')
+            ? preg_replace('#/storage/v1/object/public/.*$#', '', env('SUPABASE_STORAGE_PUBLIC_URL'))
+            : null),
+        'anon_key' => env('SUPABASE_ANON_KEY') ?: env('SUPABASE_STORAGE_ACCESS_KEY_ID'),
+        'service_role_key' => env('SUPABASE_SERVICE_ROLE_KEY'),
+    ],
+
+    'google' => [
+        'maps_api_key' => env('GOOGLE_MAPS_API_KEY'),
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect_uri' => env('GOOGLE_REDIRECT_URI'),
+    ],
+
+    'google_drive' => [
+        'client_config' => env('GOOGLE_DRIVE_CLIENT_CONFIG'),
+        'redirect_uri' => env('GOOGLE_DRIVE_REDIRECT_URI'),
+        'backup_folder_id' => env('GOOGLE_DRIVE_BACKUP_FOLDER_ID'),
+    ],
+
 ];

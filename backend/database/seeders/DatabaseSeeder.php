@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
@@ -13,6 +14,16 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $superAdminRole = Role::query()->firstOrCreate(
+            ['slug' => Role::SUPER_ADMIN_SLUG],
+            [
+                'name' => 'Super Admin',
+                'permissions' => User::defaultAdminPermissions(),
+                'is_system' => true,
+                'is_active' => true,
+            ]
+        );
+
         $this->upsertUser([
             'full_name' => 'CDRRMO Admin',
             'email' => 'admin@rescuelink.test',
@@ -23,6 +34,7 @@ class DatabaseSeeder extends Seeder
             'role' => 'admin',
             'status' => 'verified',
             'role_permissions' => User::defaultAdminPermissions(),
+            'role_id' => $superAdminRole->id,
         ]);
 
         $this->upsertUser([
@@ -64,6 +76,7 @@ class DatabaseSeeder extends Seeder
                 'role' => $payload['role'],
                 'status' => $payload['status'],
                 'role_permissions' => $payload['role_permissions'] ?? null,
+                'role_id' => $payload['role_id'] ?? null,
             ]
         );
     }

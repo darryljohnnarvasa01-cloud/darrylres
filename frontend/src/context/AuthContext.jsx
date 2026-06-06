@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { api } from '../lib/api'
+import { api, clearApiCache } from '../lib/api'
 import { clearAuthState, getAuthState, saveAuthState } from '../lib/authStorage'
 import { disconnectEcho, initializeEcho } from '../lib/echo'
+import { guestHeaders } from '../lib/guestReporting'
 import { getDefaultRouteForUser, hasPermission, permissionListForUser } from '../lib/permissions'
 
 const AuthContext = createContext(null)
@@ -10,6 +11,7 @@ const EMPTY_AUTH_STATE = { user: null, token: null, role: null }
 
 export function AuthProvider({ children }) {
   const [authState, setAuthState] = useState(getAuthState)
+  const [isHydrating, setIsHydrating] = useState(Boolean(getAuthState().token))
 
   const applyAuthState = useCallback(({ user, token, role }) => {
     const nextState = { user, token, role }
@@ -19,12 +21,33 @@ export function AuthProvider({ children }) {
 
   const clearSession = useCallback(() => {
     setAuthState(EMPTY_AUTH_STATE)
+    setIsHydrating(false)
     clearAuthState()
+    clearApiCache()
     disconnectEcho()
   }, [])
 
-  const login = useCallback(({ user, token, role }) => {
+  const login = useCallback(async ({ user, token, role }) => {
     applyAuthState({ user, token, role })
+    clearApiCache()
+
+    if (role !== 'citizen') {
+      return { claimedCount: 0 }
+    }
+
+    try {
+      const response = await api.post('/api/v1/incidents/guest/claim', {}, {
+        headers: guestHeaders(),
+      })
+
+      return {
+        claimedCount: Number(response.data?.data?.claimed_count ?? 0),
+      }
+    } catch {
+      return { claimedCount: 0 }
+    } finally {
+      clearApiCache()
+    }
   }, [applyAuthState])
 
   const logout = useCallback(async () => {
@@ -47,15 +70,19 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!authState.token) {
+      setIsHydrating(false)
       return undefined
     }
 
     let active = true
+    setIsHydrating(true)
 
     const hydrateUser = async () => {
       try {
         const response = await api.get('/api/v1/auth/me')
         const payload = response.data?.data
+        const role = payload?.role ?? payload?.user?.role
+        const user = payload?.user
 
         if (!active) {
           return
@@ -64,8 +91,8 @@ export function AuthProvider({ children }) {
         setAuthState((current) => {
           const nextState = {
             ...current,
-            role: payload?.role ?? current.role,
-            user: payload?.user ?? current.user,
+            role: role ?? current.role,
+            user: user ?? current.user,
           }
 
           saveAuthState(nextState)
@@ -76,6 +103,10 @@ export function AuthProvider({ children }) {
 
         if (active && (status === 401 || status === 403)) {
           clearSession()
+        }
+      } finally {
+        if (active) {
+          setIsHydrating(false)
         }
       }
     }
@@ -104,13 +135,14 @@ export function AuthProvider({ children }) {
     () => ({
       ...authState,
       isAuthenticated: Boolean(authState.token),
+      isHydrating,
       permissions,
       can,
       defaultRoute,
       login,
       logout,
     }),
-    [authState, can, defaultRoute, login, logout, permissions],
+    [authState, can, defaultRoute, isHydrating, login, logout, permissions],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

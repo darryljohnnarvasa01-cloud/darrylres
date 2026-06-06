@@ -1,6 +1,7 @@
 import { Search, X } from 'lucide-react'
+import { memo } from 'react'
 
-function AdminSearchField({
+const AdminSearchField = memo(function AdminSearchField({
   value,
   onChange,
   placeholder = 'Search...',
@@ -28,6 +29,6 @@ function AdminSearchField({
       ) : null}
     </label>
   )
-}
+})
 
 export default AdminSearchField

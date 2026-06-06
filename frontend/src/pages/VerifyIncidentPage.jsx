@@ -1,10 +1,13 @@
 import { AlertTriangle, BadgeCheck, Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import CrowdsourceButtons from '../components/CrowdsourceButtons'
+import LanguageSwitcher from '../components/LanguageSwitcher'
 import { getIncidentType } from '../data/incidentTypes'
 import { api } from '../lib/api'
 import { formatDateTime } from '../lib/datetime'
 import { parseApiError } from '../lib/errorUtils'
+import { useI18n } from '../lib/i18n'
 
 const STATUS_STYLES = {
   pending_verification: 'bg-amber-100 text-amber-700',
@@ -15,11 +18,19 @@ const STATUS_STYLES = {
   resolved: 'bg-emerald-100 text-emerald-700',
 }
 
+const TRANSLATED_STATUS_KEYS = {
+  pending_verification: 'Pending',
+  verified: 'Verified',
+  resolved: 'Resolved',
+}
+
 function VerifyIncidentPage() {
+  const { t } = useI18n()
   const { incidentCode = '' } = useParams()
   const [loading, setLoading] = useState(true)
   const [errorMessage, setErrorMessage] = useState('')
   const [incident, setIncident] = useState(null)
+  const [currentLocation, setCurrentLocation] = useState(null)
 
   useEffect(() => {
     let isMounted = true
@@ -54,6 +65,27 @@ function VerifyIncidentPage() {
     }
   }, [incidentCode])
 
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      return undefined
+    }
+
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        setCurrentLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        })
+      },
+      () => {
+        setCurrentLocation(null)
+      },
+      { enableHighAccuracy: true, maximumAge: 60000, timeout: 10000 },
+    )
+
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [])
+
   const incidentType = useMemo(() => getIncidentType(incident?.type ?? 'other'), [incident?.type])
   const statusClass = STATUS_STYLES[incident?.status] ?? 'bg-slate-100 text-slate-700'
 
@@ -64,9 +96,12 @@ function VerifyIncidentPage() {
           <Link to="/" className="text-sm font-semibold text-[#CC0000] hover:underline">
             RescueLink
           </Link>
-          <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-sm dark:bg-slate-900">
-            <ShieldCheck className="h-4 w-4 text-[#003366]" />
-            CDRRMO Verification Portal
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <LanguageSwitcher />
+            <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold shadow-sm dark:bg-slate-900">
+              <ShieldCheck className="h-4 w-4 text-[#003366]" />
+              CDRRMO Verification Portal
+            </div>
           </div>
         </header>
 
@@ -101,18 +136,41 @@ function VerifyIncidentPage() {
                 </article>
 
                 <article className="rounded-xl bg-[#F8FAFC] p-4 dark:bg-slate-800/60">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Incident Status</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Incident {t('Status')}</p>
                   <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}>
-                    {incident?.status?.replaceAll('_', ' ')}
+                    {TRANSLATED_STATUS_KEYS[incident?.status]
+                      ? t(TRANSLATED_STATUS_KEYS[incident.status])
+                      : incident?.status?.replaceAll('_', ' ')}
                   </span>
                 </article>
 
                 <article className="rounded-xl bg-[#F8FAFC] p-4 dark:bg-slate-800/60">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Incident Details</p>
                   <div className="mt-2 space-y-1 text-sm text-slate-700 dark:text-slate-200">
-                    <p><span className="font-semibold">Type:</span> {incidentType.label}</p>
+                    <p><span className="font-semibold">Type:</span> {t(incidentType.label)}</p>
                     <p><span className="font-semibold">Barangay:</span> {incident?.barangay ?? 'Unknown'}</p>
                     <p><span className="font-semibold">Date Filed:</span> {formatDateTime(incident?.date_filed)}</p>
+                  </div>
+                </article>
+
+                <article className="rounded-xl bg-[#F8FAFC] p-4 dark:bg-slate-800/60">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Community Verification</p>
+                  <div className="mt-2">
+                    <CrowdsourceButtons
+                      incident={incident}
+                      currentLocation={currentLocation}
+                      onUpdate={(updatedCounts) => {
+                        setIncident((prev) =>
+                          prev
+                            ? {
+                              ...prev,
+                              confirmations_count: updatedCounts.confirmations_count,
+                              disputes_count: updatedCounts.disputes_count,
+                            }
+                            : prev,
+                        )
+                      }}
+                    />
                   </div>
                 </article>
               </section>
@@ -120,7 +178,7 @@ function VerifyIncidentPage() {
               <section className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
                 <div className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-400">
                   <BadgeCheck className="h-4 w-4" />
-                  Verified via Official CDRRMO Channel
+                  {t('Verified')} via Official CDRRMO Channel
                 </div>
                 <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
                   {incident?.qr_code_svg ? (

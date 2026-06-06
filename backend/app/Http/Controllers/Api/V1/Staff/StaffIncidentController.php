@@ -6,8 +6,11 @@ use App\Events\IncidentStatusUpdated;
 use App\Events\IncidentVerificationUpdated;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Staff\UpdateStaffIncidentStatusRequest;
+use App\Http\Resources\Api\V1\IncidentDetailResource;
+use App\Http\Resources\Api\V1\IncidentSummaryResource;
 use App\Models\Incident;
 use App\Models\User;
+use App\Services\Admin\CommandCenterService;
 use App\Support\ApiResponse;
 use App\Support\AuditLogger;
 use App\Support\IncidentStatusProgression;
@@ -35,7 +38,22 @@ class StaffIncidentController extends Controller
         $staff = $request->user();
 
         $query = $this->staffIncidentQuery($staff)
-            ->with($this->incidentRelations())
+            ->with($this->incidentSummaryRelations())
+            ->select([
+                'id',
+                'reference_code',
+                'reporter_id',
+                'is_guest',
+                'type',
+                'latitude',
+                'longitude',
+                'address_label',
+                'status',
+                'is_iot_generated',
+                'incident_datetime',
+                'created_at',
+                'resolved_at',
+            ])
             ->orderByDesc('created_at');
 
         if (! empty($validated['status'])) {
@@ -43,6 +61,9 @@ class StaffIncidentController extends Controller
         }
 
         $incidents = $query->paginate($validated['per_page'] ?? 12)->withQueryString();
+        $incidents->getCollection()->transform(
+            fn (Incident $incident) => (new IncidentSummaryResource($incident))->resolve()
+        );
 
         return $this->successResponse([
             'incidents' => $incidents,
@@ -58,11 +79,11 @@ class StaffIncidentController extends Controller
         }
 
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => (new IncidentDetailResource($incident))->resolve(),
         ], 'Assigned incident retrieved successfully.');
     }
 
-    public function updateStatus(UpdateStaffIncidentStatusRequest $request, string $incidentId)
+    public function updateStatus(UpdateStaffIncidentStatusRequest $request, string $incidentId, CommandCenterService $commandCenter)
     {
         $staff = $request->user();
         $validated = $request->validated();
@@ -161,8 +182,10 @@ class StaffIncidentController extends Controller
             );
         }
 
+        $commandCenter->clear();
+
         return $this->successResponse([
-            'incident' => $incident,
+            'incident' => $incident ? (new IncidentDetailResource($incident))->resolve() : null,
         ], 'Incident status updated successfully.');
     }
 
@@ -210,10 +233,23 @@ class StaffIncidentController extends Controller
     {
         return [
             'reporter:id,full_name,email,phone,barangay,address,role,status',
+            'reporter.emergencyProfile:id,user_id,emergency_contact_name,emergency_contact_phone,is_public',
             'media',
+            'latestAssignment.staff:id,full_name,email,phone,barangay,role,status',
             'assignments.staff:id,full_name,email,phone,barangay,role,status',
             'assignments.assignedBy:id,full_name,role',
             'logs.changedByUser:id,full_name,role',
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function incidentSummaryRelations(): array
+    {
+        return [
+            'reporter:id,full_name,email,phone,barangay',
+            'latestAssignment.staff:id,full_name,email,phone,barangay,role,status',
         ];
     }
 }

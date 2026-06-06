@@ -9,6 +9,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Session\TokenMismatchException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -22,7 +23,6 @@ return Application::configure(basePath: dirname(__DIR__))
         ['middleware' => ['auth:sanctum']]
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->statefulApi();
         $middleware->append(ForceHttps::class);
         $middleware->alias([
             'ability' => EnsureAbility::class,
@@ -32,12 +32,28 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->render(function (AuthenticationException $exception, Request $request) {
-            if ($request->is('api/*') || $request->expectsJson()) {
+            if ($request->is('api/*') || $request->is('broadcasting/auth') || $request->expectsJson()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthenticated.',
                     'errors' => [],
                 ], 401);
+            }
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated.',
+                'errors' => [],
+            ], 401);
+        });
+
+        $exceptions->render(function (TokenMismatchException $exception, Request $request) {
+            if ($request->is('api/*') || $request->is('broadcasting/auth') || $request->expectsJson()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'CSRF token mismatch. This API accepts bearer-token authentication; retry the request without session login cookies.',
+                    'errors' => [],
+                ], 419);
             }
 
             return null;

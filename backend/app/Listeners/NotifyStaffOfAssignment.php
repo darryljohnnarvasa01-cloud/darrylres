@@ -5,9 +5,17 @@ namespace App\Listeners;
 use App\Events\IncidentAssignedToStaff;
 use App\Events\NotificationCreated;
 use App\Models\Notification;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\InteractsWithQueue;
 
-class NotifyStaffOfAssignment
+class NotifyStaffOfAssignment implements ShouldQueue
 {
+    use InteractsWithQueue;
+
+    public int $tries = 3;
+
+    public int $backoff = 5;
+
     /**
      * Handle the event.
      */
