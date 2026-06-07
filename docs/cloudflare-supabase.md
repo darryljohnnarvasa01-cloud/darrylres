@@ -52,9 +52,9 @@ Set at minimum:
 
 ```bash
 APP_URL=https://rescuelink-api.darryljohnnarvasa01.workers.dev
-FRONTEND_URL=https://darrylres.darryljohnnarvasa01.workers.dev
-CLOUDFLARE_FRONTEND_URL=https://darrylres.darryljohnnarvasa01.workers.dev
-CORS_ALLOWED_ORIGINS=https://darrylres.darryljohnnarvasa01.workers.dev
+FRONTEND_URL=https://rescuelink.darryljohnnarvasa01.workers.dev
+CLOUDFLARE_FRONTEND_URL=https://rescuelink.darryljohnnarvasa01.workers.dev
+CORS_ALLOWED_ORIGINS=https://rescuelink.darryljohnnarvasa01.workers.dev,https://darrylres.darryljohnnarvasa01.workers.dev
 DB_HOST=aws-0-your-region.pooler.supabase.com
 DB_PORT=6543
 DB_DATABASE=postgres

@@ -17,6 +17,8 @@ if (! function_exists('cors_allowed_origins')) {
             ->merge([
                 env('FRONTEND_URL'),
                 env('CLOUDFLARE_FRONTEND_URL'),
+                'https://darrylres.darryljohnnarvasa01.workers.dev',
+                'https://rescuelink.darryljohnnarvasa01.workers.dev',
             ])
             ->filter(fn ($origin): bool => is_string($origin))
             ->map(fn (string $origin): string => trim($origin))
