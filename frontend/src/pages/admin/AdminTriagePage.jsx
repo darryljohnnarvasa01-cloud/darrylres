@@ -64,7 +64,19 @@ const STATUS_TO_COLUMN = BOARD_COLUMNS.reduce((map, column) => {
 const swrFetcher = (path) => api.get(path, { cacheTtl: 30000 }).then((response) => response.data?.data ?? {})
 
 async function triageBoardFetcher() {
-  return api.get('/api/v1/admin/incidents/triage-board', { cacheTtl: 10000 }).then((response) => response.data?.data ?? {})
+  try {
+    const response = await api.get('/api/v1/admin/incidents/triage-board', { cacheTtl: 10000 })
+
+    return response.data?.data ?? {}
+  } catch (error) {
+    if (error?.response?.status !== 404) {
+      throw error
+    }
+
+    const response = await api.get('/api/v1/admin/incidents?per_page=100&lite=1', { cacheTtl: 10000 })
+
+    return response.data?.data ?? {}
+  }
 }
 
 function getIncidentCode(incident) {

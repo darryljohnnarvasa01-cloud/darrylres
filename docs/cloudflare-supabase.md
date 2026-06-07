@@ -12,10 +12,11 @@ Use this when the React frontend stays on Cloudflare Pages and the Laravel API m
 
 ```bash
 VITE_API_BASE_URL=https://rescuelink-api.darryljohnnarvasa01.workers.dev
+VITE_REVERB_ENABLED=false
 VITE_REVERB_APP_KEY=rescuelink-key
-VITE_REVERB_HOST=rescuelink-api.darryljohnnarvasa01.workers.dev
+VITE_REVERB_HOST=
 VITE_REVERB_PORT=443
-VITE_REVERB_TLS=true
+VITE_REVERB_TLS=false
 ```
 
 The frontend also loads `/config.js` before React starts. You can change the backend URL without rebuilding by updating that file in the deployed asset:
@@ -24,16 +25,18 @@ The frontend also loads `/config.js` before React starts. You can change the bac
 window.__RESCUELINK_CONFIG__ = {
   apiBaseUrl: 'https://rescuelink-api.darryljohnnarvasa01.workers.dev',
   reverb: {
+    enabled: false,
     appKey: 'rescuelink-key',
-    host: 'rescuelink-api.darryljohnnarvasa01.workers.dev',
-    port: 443,
+    host: '',
+    port: 8080,
     wssPort: 443,
-    tls: true,
+    tls: false,
   },
 }
 ```
 
 Leave `apiBaseUrl` empty only when the API is served from the same origin as the frontend through a reverse proxy.
+Enable Reverb only after deploying a real Laravel Reverb WebSocket server, then point `VITE_REVERB_HOST` or `reverb.host` at that WebSocket hostname.
 
 ## Backend on a Laravel-capable host
 

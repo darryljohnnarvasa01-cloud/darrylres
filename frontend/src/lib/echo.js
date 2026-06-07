@@ -30,8 +30,25 @@ function getRuntimeReverbConfig() {
   return config.reverb || {}
 }
 
+function isReverbEnabled(reverbConfig) {
+  const configuredEnabled = reverbConfig.enabled ?? import.meta.env.VITE_REVERB_ENABLED
+
+  if (configuredEnabled !== undefined && configuredEnabled !== null && configuredEnabled !== '') {
+    return asBoolean(configuredEnabled, false)
+  }
+
+  return Boolean(asString(reverbConfig.host) || import.meta.env.VITE_REVERB_HOST)
+}
+
 export function initializeEcho(token) {
   if (!token) {
+    return null
+  }
+
+  const reverbConfig = getRuntimeReverbConfig()
+
+  if (!isReverbEnabled(reverbConfig)) {
+    disconnectEcho()
     return null
   }
 
@@ -41,7 +58,6 @@ export function initializeEcho(token) {
 
   window.Pusher = Pusher
 
-  const reverbConfig = getRuntimeReverbConfig()
   const envPort = Number(import.meta.env.VITE_REVERB_PORT ?? 8080)
   const wsHost = asString(reverbConfig.host) ?? import.meta.env.VITE_REVERB_HOST ?? window.location.hostname
   const wsPort = asNumber(reverbConfig.port, envPort)
