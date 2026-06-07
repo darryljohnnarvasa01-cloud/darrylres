@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "build": "cd frontend && npm run build",
-    "deploy": "cd frontend && npm ci --progress=false && npm run build && cd .. && node frontend/scripts/remove-cloudflare-redirects.js && npx wrangler deploy",
-    "deploy:dry-run": "cd frontend && npm ci --progress=false && npm run build && cd .. && node frontend/scripts/remove-cloudflare-redirects.js && npx wrangler deploy --dry-run"
+    "build": "npm --prefix frontend ci --progress=false && npm --prefix frontend run build",
+    "deploy": "npm run build && node frontend/scripts/remove-cloudflare-redirects.js && npx wrangler deploy",
+    "deploy:dry-run": "npm run build && node frontend/scripts/remove-cloudflare-redirects.js && npx wrangler deploy --dry-run"
   },
   "devDependencies": {
     "supabase": "^2.98.2"
