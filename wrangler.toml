@@ -1,8 +1,8 @@
-name = "rescuelink"
+name = "darrylres"
 compatibility_date = "2026-06-07"
 
 [build]
-command = "cd frontend && npm ci && npm run build"
+command = "node frontend/scripts/remove-cloudflare-redirects.js"
 
 [assets]
 directory = "./frontend/dist"

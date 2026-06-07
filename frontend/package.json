@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "node scripts/remove-cloudflare-redirects.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
