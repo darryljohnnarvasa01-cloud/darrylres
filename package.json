@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "build": "cd frontend && npm run build",
+    "deploy": "cd frontend && npm ci --progress=false && npm run build && cd .. && npx wrangler deploy",
+    "deploy:dry-run": "cd frontend && npm ci --progress=false && npm run build && cd .. && npx wrangler deploy --dry-run"
+  },
   "devDependencies": {
     "supabase": "^2.98.2"
   }
