@@ -35,10 +35,16 @@ const publicRoutes = new Hono<AppEnv>()
 
 type AppContext = Context<AppEnv>
 
+const INCIDENT_FUTURE_SKEW_MS = 5 * 60 * 1000
+
 const incidentFormSchema = z.object({
+  client_uuid: z.string().uuid().optional(),
   type: z.enum(['fire', 'medical', 'crime', 'flood', 'accident', 'other']),
   description: z.string().trim().min(20).max(1000),
-  incident_datetime: z.coerce.date().max(new Date()),
+  incident_datetime: z.coerce.date().refine(
+    (date) => date.getTime() <= Date.now() + INCIDENT_FUTURE_SKEW_MS,
+    'Use the current time or an earlier time.',
+  ),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
   address_label: z.string().trim().min(1).max(255),
@@ -175,6 +181,20 @@ function validationErrorResponse(c: AppContext, errors: Record<string, string[]>
   }, 422)
 }
 
+function logSupabaseError(context: string, error: {
+  message?: string
+  code?: string
+  details?: string
+  hint?: string
+}) {
+  console.error(context, {
+    message: error.message ?? null,
+    code: error.code ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  })
+}
+
 function duplicateResponse(c: AppContext, existingIncidentId: string, minutesAgo: number, guestQuota?: unknown) {
   return c.json({
     success: false,
@@ -306,10 +326,49 @@ async function reserveGuestQuota(c: AppContext, supabase: NonNullable<ReturnType
   }
 }
 
+async function guestQuota(c: AppContext, supabase: NonNullable<ReturnType<typeof getSupabase>>) {
+  const identity = await guestIdentity(c)
+  const limit = Math.max(1, Number(c.env.GUEST_REPORT_LIMIT || 10) || 10)
+  const { data: existing, error } = await supabase
+    .from('guest_report_usages')
+    .select('reports_count')
+    .eq('guest_identifier', identity.guest_identifier)
+    .maybeSingle()
+
+  if (error) {
+    console.warn('Guest quota lookup failed.', error.message)
+  }
+
+  const used = Math.min(Number(existing?.reports_count ?? 0), limit)
+
+  return {
+    limit,
+    used,
+    remaining: Math.max(0, limit - used),
+    limit_reached: used >= limit,
+  }
+}
+
 function verificationUrl(c: AppContext, referenceCode: string) {
   const frontendUrl = (c.env.FRONTEND_URL || '').replace(/\/+$/, '')
 
   return frontendUrl ? `${frontendUrl}/verify/${referenceCode}` : `/verify/${referenceCode}`
+}
+
+export async function guestIncidentQuota(c: AppContext) {
+  const supabase = getSupabase(c.env)
+
+  if (!supabase) {
+    return c.json({
+      success: false,
+      errors: {},
+      message: 'Supabase credentials are not configured.',
+    }, 503)
+  }
+
+  return successResponse(c, {
+    guest_quota: publicGuestQuota(await guestQuota(c, supabase)),
+  }, 'Guest report quota retrieved successfully.')
 }
 
 export async function storeGuestIncident(c: AppContext) {
@@ -325,6 +384,7 @@ export async function storeGuestIncident(c: AppContext) {
 
   const formData = await c.req.formData()
   const rawPayload = {
+    client_uuid: formData.get('client_uuid') || undefined,
     type: formData.get('type'),
     description: formData.get('description'),
     incident_datetime: formData.get('incident_datetime'),
@@ -391,9 +451,44 @@ export async function storeGuestIncident(c: AppContext) {
     }
   }
 
+  if (payload.client_uuid) {
+    const { data: existingIncident, error: existingIncidentError } = await supabase
+      .from('incidents')
+      .select('id,reference_code,status,type,address_label,created_at,is_guest,guest_identifier')
+      .eq('client_uuid', payload.client_uuid)
+      .maybeSingle()
+
+    if (existingIncidentError) {
+      logSupabaseError('Guest incident idempotency lookup failed.', existingIncidentError)
+    }
+
+    if (existingIncident) {
+      if (existingIncident.is_guest && existingIncident.guest_identifier === quota.identity.guest_identifier) {
+        return successResponse(c, {
+          id: existingIncident.id,
+          reference_code: existingIncident.reference_code,
+          status: existingIncident.status,
+          verification_url: verificationUrl(c, existingIncident.reference_code),
+          guest_quota: guestQuota,
+          media_stored: false,
+          media_count: 0,
+        }, `Report submitted! Reference: ${existingIncident.reference_code}`, 200)
+      }
+
+      return c.json({
+        success: false,
+        errors: {
+          client_uuid: ['This client report id is already attached to another report.'],
+        },
+        message: 'Client report id was already used.',
+      }, 409)
+    }
+  }
+
   const { data: incident, error } = await supabase
     .from('incidents')
     .insert({
+      client_uuid: payload.client_uuid ?? null,
       is_guest: true,
       guest_identifier: quota.identity.guest_identifier,
       type: payload.type,
@@ -409,7 +504,7 @@ export async function storeGuestIncident(c: AppContext) {
     .single()
 
   if (error) {
-    console.error('Guest incident insert failed.', error.message)
+    logSupabaseError('Guest incident insert failed.', error)
 
     return c.json({
       success: false,

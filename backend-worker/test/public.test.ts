@@ -63,4 +63,37 @@ describe('Worker API smoke routes', () => {
     expect(body.success).toBe(false)
     expect(body.message).toBe('Supabase credentials are not configured.')
   })
+
+  it('returns a readable validation error for future incident dates', async () => {
+    const formData = new FormData()
+    formData.set('type', 'fire')
+    formData.set('description', 'A valid emergency report description for testing.')
+    formData.set('incident_datetime', new Date(Date.now() + 10 * 60 * 1000).toISOString())
+    formData.set('latitude', '7.9')
+    formData.set('longitude', '125.1')
+    formData.set('address_label', 'Valencia City')
+    formData.append('media[]', new File(['image'], 'incident.jpg', { type: 'image/jpeg' }))
+
+    const response = await app.request('/api/v1/incidents/guest', {
+      method: 'POST',
+      body: formData,
+    }, env)
+    const body = await response.json()
+
+    expect(response.status).toBe(422)
+    expect(body.success).toBe(false)
+    expect(body.errors.incident_datetime).toEqual(['Use the current time or an earlier time.'])
+  })
+
+  it('reports missing Supabase credentials for guest quota lookup', async () => {
+    const response = await app.request('/api/v1/incidents/guest/quota', {}, {
+      APP_NAME: 'RescueLink',
+      APP_ENV: 'test',
+    })
+    const body = await response.json()
+
+    expect(response.status).toBe(503)
+    expect(body.success).toBe(false)
+    expect(body.message).toBe('Supabase credentials are not configured.')
+  })
 })

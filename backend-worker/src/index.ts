@@ -4,7 +4,7 @@ import adminRoutes from './routes/admin'
 import authRoutes from './routes/auth'
 import healthRoutes from './routes/health'
 import notificationRoutes from './routes/notifications'
-import publicRoutes, { storeGuestIncident } from './routes/public'
+import publicRoutes, { guestIncidentQuota, storeGuestIncident } from './routes/public'
 import type { AppEnv } from './types'
 import { errorResponse, successResponse } from './utils/apiResponse'
 
@@ -23,6 +23,7 @@ app.route('/api/v1/auth', authRoutes)
 app.route('/api/v1/admin', adminRoutes)
 app.route('/api/v1/notifications', notificationRoutes)
 app.route('/api/v1/public', publicRoutes)
+app.get('/api/v1/incidents/guest/quota', guestIncidentQuota)
 app.post('/api/v1/incidents/guest', storeGuestIncident)
 app.post('/api/v1/incidents/guest/claim', (c) => successResponse(c, {
   claimed_count: 0,
