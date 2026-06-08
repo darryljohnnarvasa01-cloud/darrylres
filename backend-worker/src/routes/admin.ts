@@ -257,48 +257,112 @@ adminRoutes.get('/dashboard/command-center', async (c) => {
 })
 
 adminRoutes.get('/ai-risk-board', async (c) => {
-  const auth = c.get('auth')
-  const page = Math.max(1, Number(c.req.query('page') || 1) || 1)
-  const perPage = Math.min(100, Math.max(1, Number(c.req.query('per_page') || 20) || 20))
-  const from = (page - 1) * perPage
-  const to = from + perPage - 1
-  const countQuery = auth.supabase
-    .from('incidents')
-    .select('id', { count: 'exact', head: true })
-    .gte('ai_risk_score', 70)
-  const rowsQuery = auth.supabase
-    .from('incidents')
-    .select('*')
-    .gte('ai_risk_score', 70)
-    .order('ai_risk_score', { ascending: false })
-    .order('created_at', { ascending: false })
-    .range(from, to)
-  const [{ count, error: countError }, { data, error: rowsError }] = await Promise.all([
-    countQuery,
-    rowsQuery,
-  ])
+  try {
+    const auth = c.get('auth')
+    const page = Math.max(1, Number(c.req.query('page') || 1) || 1)
+    const perPage = Math.min(100, Math.max(1, Number(c.req.query('per_page') || 20) || 20))
+    const from = (page - 1) * perPage
+    const to = from + perPage - 1
 
-  if (countError) {
-    console.warn('AI risk count query failed.', countError.message)
+    const countQuery = auth.supabase
+      .from('incidents')
+      .select('id', { count: 'exact', head: true })
+      .gte('ai_risk_score', 70)
+
+    const rowsQuery = auth.supabase
+      .from('incidents')
+      .select(`
+        id,
+        reference_code,
+        reporter_id,
+        is_guest,
+        type,
+        description,
+        latitude,
+        longitude,
+        address_label,
+        status,
+        is_iot_generated,
+        device_id,
+        ai_risk_score,
+        incident_datetime,
+        created_at,
+        resolved_at,
+        users!reporter_id(id,full_name,barangay,email,phone)
+      `)
+      .gte('ai_risk_score', 70)
+      .order('ai_risk_score', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(from, to)
+
+    const [{ count, error: countError }, { data, error: rowsError }] = await Promise.all([
+      countQuery,
+      rowsQuery,
+    ])
+
+    if (countError) {
+      console.warn('AI risk count query failed.', countError.message)
+    }
+
+    if (rowsError) {
+      console.warn('AI risk board query failed.', rowsError.message)
+    }
+
+    const total = count ?? 0
+
+    const incidents = (data ?? []).map((incident: any) => ({
+      id: incident.id,
+      reference_code: incident.reference_code,
+      type: incident.type,
+      status: incident.status,
+      is_guest: Boolean(incident.is_guest),
+      latitude: Number(incident.latitude),
+      longitude: Number(incident.longitude),
+      address_label: incident.address_label,
+      barangay: extractBarangay(incident.address_label),
+      description: incident.description,
+      is_iot_generated: Boolean(incident.is_iot_generated),
+      device_id: incident.device_id,
+      ai_risk_score: Number(incident.ai_risk_score ?? 0),
+      incident_datetime: incident.incident_datetime,
+      created_at: incident.created_at,
+      resolved_at: incident.resolved_at,
+      reporter: incident.users ? {
+        id: incident.users.id,
+        full_name: incident.users.full_name,
+        email: incident.users.email,
+        phone: incident.users.phone,
+        barangay: incident.users.barangay,
+      } : null,
+      latestAssignment: null,
+      assignments: [],
+    }))
+
+    return successResponse(c, {
+      incidents: {
+        data: incidents,
+        current_page: page,
+        last_page: Math.max(1, Math.ceil(total / perPage)),
+        per_page: perPage,
+        total,
+        prev_page_url: page > 1 ? `/api/v1/admin/ai-risk-board?page=${page - 1}&per_page=${perPage}` : null,
+        next_page_url: to + 1 < total ? `/api/v1/admin/ai-risk-board?page=${page + 1}&per_page=${perPage}` : null,
+      },
+    }, 'AI risk board retrieved successfully.')
+  } catch (err) {
+    console.error('AI risk board error:', err)
+    return successResponse(c, {
+      incidents: {
+        data: [],
+        current_page: 1,
+        last_page: 1,
+        per_page: 20,
+        total: 0,
+        prev_page_url: null,
+        next_page_url: null,
+      },
+    }, 'AI risk board retrieved successfully.')
   }
-
-  if (rowsError) {
-    console.warn('AI risk board query failed.', rowsError.message)
-  }
-
-  const total = count ?? 0
-
-  return successResponse(c, {
-    incidents: {
-      data: (data ?? []).map(serializeIncidentSummary),
-      current_page: page,
-      last_page: Math.max(1, Math.ceil(total / perPage)),
-      per_page: perPage,
-      total,
-      prev_page_url: page > 1 ? `/api/v1/admin/ai-risk-board?page=${page - 1}&per_page=${perPage}` : null,
-      next_page_url: to + 1 < total ? `/api/v1/admin/ai-risk-board?page=${page + 1}&per_page=${perPage}` : null,
-    },
-  }, 'AI risk board retrieved successfully.')
 })
 
 adminRoutes.get('/navigation-counts', async (c) => {
