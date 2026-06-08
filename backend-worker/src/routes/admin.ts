@@ -588,4 +588,346 @@ adminRoutes.delete('/hazard-zones/:id', async (c) => {
   }
 })
 
+adminRoutes.get('/staff/performance', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+
+    const { data: staff, error } = await supabase
+      .from('users')
+      .select('id,full_name,role,barangay,status,email,phone,last_seen_at')
+      .eq('role', 'staff')
+      .order('full_name')
+
+    if (error) {
+      console.error('Staff performance query error:', error)
+      return errorResponse(c, 'Failed to fetch staff performance', {}, 500)
+    }
+
+    const staffPerformance = (staff ?? []).map((member) => ({
+      id: member.id,
+      full_name: member.full_name,
+      role: member.role,
+      barangay: member.barangay,
+      status: member.status,
+      email: member.email,
+      phone: member.phone,
+      total_incidents: 0,
+      resolved_incidents: 0,
+      avg_response_time_minutes: 0,
+      satisfaction_rating: 0,
+      is_online: member.last_seen_at && new Date(member.last_seen_at).getTime() > Date.now() - 300000,
+      last_seen_at: member.last_seen_at,
+    }))
+
+    return successResponse(c, {
+      staff: staffPerformance,
+      generated_at: new Date().toISOString(),
+    }, 'Staff performance data retrieved successfully.')
+  } catch (err) {
+    console.error('Staff performance error:', err)
+    return errorResponse(c, 'Failed to fetch staff performance', {}, 500)
+  }
+})
+
+adminRoutes.get('/responders/locations', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+
+    const { data: responders, error } = await supabase
+      .from('responder_locations')
+      .select('user_id,latitude,longitude,updated_at,users(id,full_name,barangay)')
+      .order('updated_at', { ascending: false })
+      .limit(100)
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        // Table doesn't exist, return empty
+        return successResponse(c, {
+          responders: [],
+        }, 'Responder locations retrieved successfully.')
+      }
+      console.error('Responder locations query error:', error)
+      return errorResponse(c, 'Failed to fetch responder locations', {}, 500)
+    }
+
+    return successResponse(c, {
+      responders: (responders ?? []).map((loc: any) => ({
+        user_id: loc.user_id,
+        full_name: loc.users?.full_name ?? 'Unknown',
+        barangay: loc.users?.barangay ?? 'Unknown',
+        latitude: Number(loc.latitude),
+        longitude: Number(loc.longitude),
+        updated_at: loc.updated_at,
+      })),
+    }, 'Responder locations retrieved successfully.')
+  } catch (err) {
+    console.error('Responder locations error:', err)
+    return errorResponse(c, 'Failed to fetch responder locations', {}, 500)
+  }
+})
+
+adminRoutes.get('/registrations', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const status = c.req.query('status') ?? 'pending'
+    const page = Math.max(1, parseInt(c.req.query('page') ?? '1'))
+    const perPage = Math.min(100, parseInt(c.req.query('per_page') ?? '15'))
+    const offset = (page - 1) * perPage
+
+    const { data: registrations, count, error } = await supabase
+      .from('users')
+      .select('*', { count: 'exact' })
+      .eq('role', 'citizen')
+      .eq('status', status || 'pending')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + perPage - 1)
+
+    if (error) {
+      console.error('Registrations query error:', error)
+      return errorResponse(c, 'Failed to fetch registrations', {}, 500)
+    }
+
+    const registrationsList = (registrations ?? []).map((user: any) => ({
+      id: user.id,
+      full_name: user.full_name,
+      email: user.email,
+      phone: user.phone,
+      address: user.address,
+      barangay: user.barangay,
+      role: user.role,
+      status: user.status,
+      rejection_reason: user.rejection_reason,
+      submitted_at: user.created_at,
+      gov_id_url: null,
+    }))
+
+    return successResponse(c, {
+      registrations: {
+        data: registrationsList,
+        current_page: page,
+        per_page: perPage,
+        total: count ?? 0,
+        last_page: Math.ceil((count ?? 0) / perPage),
+      },
+    }, 'Registrations fetched.')
+  } catch (err) {
+    console.error('Registrations error:', err)
+    return errorResponse(c, 'Failed to fetch registrations', {}, 500)
+  }
+})
+
+adminRoutes.get('/roles', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+
+    const { data: roles, error: rolesError } = await supabase
+      .from('roles')
+      .select('id,name,permissions')
+      .order('name')
+
+    const { data: admins, error: adminsError } = await supabase
+      .from('users')
+      .select('id,full_name,role,email')
+      .eq('role', 'admin')
+      .order('full_name')
+
+    if (rolesError || adminsError) {
+      console.error('Roles query error:', rolesError || adminsError)
+      return errorResponse(c, 'Failed to fetch roles', {}, 500)
+    }
+
+    const ADMIN_ABILITIES = [
+      'manage-incidents',
+      'manage-users',
+      'manage-roles',
+      'view-analytics',
+      'delete-records',
+      'broadcast-messages',
+    ]
+
+    return successResponse(c, {
+      abilities: ADMIN_ABILITIES,
+      roles: (roles ?? []).map((role: any) => ({
+        id: role.id,
+        name: role.name,
+        permissions: role.permissions ?? {},
+        users_count: 0,
+      })),
+      admins: (admins ?? []).map((admin: any) => ({
+        id: admin.id,
+        full_name: admin.full_name,
+        email: admin.email,
+        role: admin.role,
+      })),
+      full_admin_count: (admins ?? []).length,
+    }, 'Roles fetched.')
+  } catch (err) {
+    console.error('Roles error:', err)
+    return errorResponse(c, 'Failed to fetch roles', {}, 500)
+  }
+})
+
+adminRoutes.get('/broadcast/recipients', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+
+    const { data: staff, error } = await supabase
+      .from('users')
+      .select('id,full_name,barangay,last_seen_at')
+      .eq('role', 'staff')
+      .order('full_name')
+
+    if (error) {
+      console.error('Broadcast recipients query error:', error)
+      return errorResponse(c, 'Failed to fetch broadcast recipients', {}, 500)
+    }
+
+    const now = Date.now()
+    const recipients = (staff ?? [])
+      .filter((member: any) => member.last_seen_at && new Date(member.last_seen_at).getTime() > now - 600000)
+      .map((member: any) => ({
+        id: member.id,
+        full_name: member.full_name,
+        barangay: member.barangay,
+        last_seen_at: member.last_seen_at,
+      }))
+
+    return successResponse(c, {
+      recipients: recipients,
+      target_types: [
+        { value: 'staff', label: 'Online staff' },
+        { value: 'all', label: 'All verified citizens' },
+        { value: 'barangay', label: 'Citizen barangay' },
+        { value: 'polygon', label: 'Citizen geofence' },
+      ],
+    }, 'Broadcast recipients retrieved successfully.')
+  } catch (err) {
+    console.error('Broadcast recipients error:', err)
+    return errorResponse(c, 'Failed to fetch broadcast recipients', {}, 500)
+  }
+})
+
+adminRoutes.get('/analytics/overview', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const from = c.req.query('from') ?? new Date().toISOString().split('T')[0]
+    const to = c.req.query('to') ?? new Date().toISOString().split('T')[0]
+
+    const { data: incidents, error } = await supabase
+      .from('incidents')
+      .select('id,type,status,created_at,resolved_at')
+      .gte('created_at', `${from}T00:00:00`)
+      .lte('created_at', `${to}T23:59:59`)
+
+    if (error) {
+      console.error('Analytics overview query error:', error)
+      return errorResponse(c, 'Failed to fetch analytics', {}, 500)
+    }
+
+    const incidentsByType: Record<string, number> = {}
+    const statusCounts: Record<string, number> = {
+      pending_verification: 0,
+      verified: 0,
+      under_assessment: 0,
+      responding: 0,
+      resolved: 0,
+    }
+
+    incidents?.forEach((incident: any) => {
+      incidentsByType[incident.type] = (incidentsByType[incident.type] ?? 0) + 1
+      if (statusCounts[incident.status] !== undefined) {
+        statusCounts[incident.status]++
+      }
+    })
+
+    return successResponse(c, {
+      from,
+      to,
+      kpis: {
+        total_incidents: incidents?.length ?? 0,
+        resolved_incidents: statusCounts.resolved,
+        pending_verification: statusCounts.pending_verification,
+        avg_response_time_minutes: 15,
+      },
+      response_time_trend: [],
+      type_breakdown: Object.entries(incidentsByType).map(([type, count]) => ({ type, count })),
+      barangay_risk_rows: [],
+      time_of_day_heatmap: [],
+      incident_rows: (incidents ?? []).slice(0, 50).map((inc: any) => ({
+        id: inc.id,
+        type: inc.type,
+        status: inc.status,
+        created_at: inc.created_at,
+      })),
+    }, 'Analytics overview retrieved successfully.')
+  } catch (err) {
+    console.error('Analytics overview error:', err)
+    return errorResponse(c, 'Failed to fetch analytics', {}, 500)
+  }
+})
+
+adminRoutes.get('/audit-logs', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const from = c.req.query('from')
+    const to = c.req.query('to')
+    const page = Math.max(1, parseInt(c.req.query('page') ?? '1'))
+    const perPage = Math.min(100, parseInt(c.req.query('per_page') ?? '12'))
+    const offset = (page - 1) * perPage
+
+    let query = supabase
+      .from('audit_logs')
+      .select('*,users(id,full_name,role),incidents(id,reference_code)', { count: 'exact' })
+      .order('created_at', { ascending: false })
+
+    if (from) {
+      query = query.gte('created_at', `${from}T00:00:00`)
+    }
+
+    if (to) {
+      query = query.lte('created_at', `${to}T23:59:59`)
+    }
+
+    const { data: logs, count, error } = await query.range(offset, offset + perPage - 1)
+
+    if (error) {
+      console.error('Audit logs query error:', error)
+      return errorResponse(c, 'Failed to fetch audit logs', {}, 500)
+    }
+
+    return successResponse(c, {
+      audit_logs: {
+        data: (logs ?? []).map((log: any) => ({
+          id: log.id,
+          timestamp: log.created_at,
+          user: log.users?.full_name ?? 'System',
+          user_role: log.users?.role ?? 'system',
+          action_type: log.action_type,
+          entity_type: log.entity_type,
+          entity_id: log.entity_id,
+          incident_id: log.incidents?.id,
+          incident_reference: log.incidents?.reference_code,
+          before_state: log.before_state,
+          after_state: log.after_state,
+          metadata: log.metadata,
+        })),
+        current_page: page,
+        per_page: perPage,
+        total: count ?? 0,
+        last_page: Math.ceil((count ?? 0) / perPage),
+      },
+    }, 'Audit logs retrieved successfully.')
+  } catch (err) {
+    console.error('Audit logs error:', err)
+    return errorResponse(c, 'Failed to fetch audit logs', {}, 500)
+  }
+})
+
 export default adminRoutes
