@@ -355,6 +355,10 @@ function verificationUrl(c: AppContext, referenceCode: string) {
   return frontendUrl ? `${frontendUrl}/verify/${referenceCode}` : `/verify/${referenceCode}`
 }
 
+function referenceCodeForIncidentId(incidentId: string) {
+  return `RLK-${incidentId.replaceAll('-', '').toUpperCase()}`
+}
+
 export async function guestIncidentQuota(c: AppContext) {
   const supabase = getSupabase(c.env)
 
@@ -485,9 +489,13 @@ export async function storeGuestIncident(c: AppContext) {
     }
   }
 
+  const incidentId = crypto.randomUUID()
+  const referenceCode = referenceCodeForIncidentId(incidentId)
   const { data: incident, error } = await supabase
     .from('incidents')
     .insert({
+      id: incidentId,
+      reference_code: referenceCode,
       client_uuid: payload.client_uuid ?? null,
       is_guest: true,
       guest_identifier: quota.identity.guest_identifier,
@@ -514,6 +522,7 @@ export async function storeGuestIncident(c: AppContext) {
   }
 
   await supabase.from('incident_logs').insert({
+    id: crypto.randomUUID(),
     incident_id: incident.id,
     changed_by: null,
     old_status: null,
