@@ -9,6 +9,8 @@ import { useOfflineSync } from './hooks/useOfflineSync'
 
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
 const VerifyIncidentPage = lazy(() => import('./pages/VerifyIncidentPage'))
 const PublicEmergencyProfilePage = lazy(() => import('./pages/PublicEmergencyProfilePage'))
@@ -77,6 +79,8 @@ function App() {
             <Route path="/qr/:qrUuid" element={<PublicEmergencyProfilePage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route
               path="/report"
               element={<ReportPage />}

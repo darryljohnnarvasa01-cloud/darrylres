@@ -9,14 +9,16 @@ import { parseApiError } from '../lib/errorUtils'
 import { getDefaultRouteForUser } from '../lib/permissions'
 
 function LoginPage() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [errors, setErrors] = useState({})
-  const [statusMessage, setStatusMessage] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const [email, setEmail] = useState(typeof location.state?.email === 'string' ? location.state.email : '')
+  const [password, setPassword] = useState('')
+  const [errors, setErrors] = useState({})
+  const [statusMessage, setStatusMessage] = useState(
+    location.state?.passwordReset ? 'Password reset successfully. You can now sign in.' : '',
+  )
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const { login } = useAuth()
   const isGuestTransition = Boolean(location.state?.fromGuestReporting || location.state?.fromGuestLimit)
   const returnTo =
     typeof location.state?.returnTo === 'string' && location.state.returnTo.startsWith('/')
@@ -103,9 +105,13 @@ function LoginPage() {
           </div>
 
           <div className="text-right">
-            <button type="button" className="text-xs font-medium text-info hover:underline">
+            <Link
+              to="/forgot-password"
+              state={{ email }}
+              className="text-xs font-medium text-info hover:underline"
+            >
               Forgot password
-            </button>
+            </Link>
           </div>
 
           <button

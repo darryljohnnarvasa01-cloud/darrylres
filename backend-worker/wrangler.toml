@@ -6,9 +6,17 @@ compatibility_date = "2026-06-06"
 APP_NAME = "RescueLink"
 APP_ENV = "production"
 FRONTEND_URL = "https://rescuelink.darryljohnnarvasa01.workers.dev"
+MAIL_FROM_NAME = "RescueLink"
+PASSWORD_RESET_EXPIRES_MINUTES = "60"
 GUEST_REPORT_LIMIT = "10"
 DEFAULT_EMERGENCY_HOTLINE = "0966-123-4567"
 CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,https://rescuelink.darryljohnnarvasa01.workers.dev,https://darrylres.darryljohnnarvasa01.workers.dev"
+# Set MAIL_FROM_ADDRESS as a Worker secret or var. It must use a Cloudflare Email Service verified domain.
+# Example: MAIL_FROM_ADDRESS = "noreply@yourdomain.com"
+
+[[send_email]]
+name = "EMAIL"
+remote = true
 
 # Uncomment after creating an R2 bucket for incident media.
 # [[r2_buckets]]
