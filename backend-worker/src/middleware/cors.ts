@@ -29,7 +29,7 @@ export function rescueLinkCors(): MiddlewareHandler<AppEnv> {
 
       return null
     },
-    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-XSRF-TOKEN'],
+    allowHeaders: ['Authorization', 'Content-Type', 'X-Requested-With', 'X-XSRF-TOKEN', 'X-RescueLink-Guest-Id'],
     allowMethods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     credentials: true,
     maxAge: 600,
