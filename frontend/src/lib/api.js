@@ -1,5 +1,6 @@
 ﻿import axios from 'axios'
 import { getAuthState } from './authStorage'
+import { getApiErrorDiagnostics } from './errorUtils'
 
 export function getRuntimeConfig() {
   if (typeof window === 'undefined') {
@@ -107,6 +108,10 @@ api.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       clearApiCache()
+    }
+
+    if (!error?.response) {
+      console.warn('[RescueLink API] Request failed without an HTTP response.', getApiErrorDiagnostics(error))
     }
 
     return Promise.reject(error)

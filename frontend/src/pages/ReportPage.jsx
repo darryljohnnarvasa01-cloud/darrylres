@@ -26,7 +26,7 @@ import OfflineQueueIndicator from '../components/OfflineQueueIndicator'
 import { INCIDENT_TYPES } from '../data/incidentTypes'
 import { api } from '../lib/api'
 import { nowForDateTimeLocal, serializeDateTimeLocal } from '../lib/datetime'
-import { parseApiError } from '../lib/errorUtils'
+import { getApiErrorDiagnostics, parseApiError } from '../lib/errorUtils'
 import { guestHeaders } from '../lib/guestReporting'
 import { useI18n } from '../lib/i18n'
 
@@ -48,7 +48,17 @@ function browserIsOffline() {
 }
 
 function isNetworkSubmitFailure(error) {
-  return !error?.response && ['ERR_NETWORK', 'ECONNABORTED', undefined].includes(error?.code)
+  const details = getApiErrorDiagnostics(error)
+
+  if (browserIsOffline()) {
+    return details.isNetworkFailure
+  }
+
+  if (details.isNetworkFailure) {
+    console.warn('[Report Submit] API request failed while browser is online; not saving as offline.', details)
+  }
+
+  return false
 }
 
 function RecenterMap({ position }) {
