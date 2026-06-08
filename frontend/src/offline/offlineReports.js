@@ -443,3 +443,16 @@ export async function getOfflineQueueSummary() {
 
   return { pending, syncing, failed, synced }
 }
+
+export async function clearFailedReports() {
+  const failedReports = await db.reports.where('status').equals('failed').toArray()
+  const count = failedReports.length
+  
+  if (count > 0) {
+    await db.reports.bulkDelete(failedReports.map(r => r.id))
+    notifyQueueChanged()
+    console.log(`Cleared ${count} failed offline report(s)`)
+  }
+  
+  return count
+}

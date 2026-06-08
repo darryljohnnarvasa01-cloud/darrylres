@@ -1,4 +1,4 @@
-import { CloudOff, Loader2, RefreshCw } from 'lucide-react'
+import { CloudOff, Loader2, RefreshCw, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useI18n } from '../lib/i18n'
 
@@ -20,6 +20,16 @@ function OfflineQueueIndicator() {
       setLoading(false)
     }
   }, [])
+
+  const clearFailed = useCallback(async () => {
+    try {
+      const module = await import('../offline/offlineReports')
+      await module.clearFailedReports()
+      await refreshSummary()
+    } catch (error) {
+      console.error('Failed to clear offline reports:', error)
+    }
+  }, [refreshSummary])
 
   useEffect(() => {
     refreshSummary()
@@ -64,14 +74,26 @@ function OfflineQueueIndicator() {
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={refreshSummary}
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-navy hover:border-info hover:text-info"
-        >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh
-        </button>
+        <div className="inline-flex items-center gap-2">
+          {summary.failed > 0 && (
+            <button
+              type="button"
+              onClick={clearFailed}
+              className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-600 hover:border-red-300 hover:bg-red-50"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Clear Failed
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={refreshSummary}
+            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-navy hover:border-info hover:text-info"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Refresh
+          </button>
+        </div>
       </div>
     </div>
   )
