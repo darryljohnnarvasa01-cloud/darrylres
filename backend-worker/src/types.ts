@@ -31,6 +31,7 @@ export type Bindings = {
   SUPABASE_SERVICE_ROLE_KEY?: string
   GOOGLE_MAPS_API_KEY?: string
   INCIDENT_MEDIA_BUCKET?: IncidentMediaBucket
+  GOVERNMENT_ID_BUCKET?: IncidentMediaBucket
   EMAIL?: SendEmailBinding
 }
 

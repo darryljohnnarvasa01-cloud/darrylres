@@ -21,6 +21,36 @@ const loginSchema = z.object({
   password: z.string().min(1),
 })
 
+const registerSchema = z.object({
+  full_name: z.string().trim().min(1).max(255),
+  email: z.string().email().max(255),
+  password: z.string().min(8),
+  password_confirmation: z.string().min(1),
+  phone: z.string().trim().min(1).max(30),
+  address: z.string().trim().min(1).max(500),
+  barangay: z.string().trim().min(1).max(255),
+}).refine((data) => data.password === data.password_confirmation, {
+  path: ['password_confirmation'],
+})
+
+const govIdTypes = new Set(['image/jpeg', 'image/png'])
+
+function formValue(formData: FormData, key: string) {
+  const value = formData.get(key)
+  return typeof value === 'string' ? value : ''
+}
+
+async function storeGovIdImage(c: AuthContext, file: File) {
+  const bucket = c.env.GOVERNMENT_ID_BUCKET
+  if (!bucket) return { ok: false as const, status: 503, message: 'Government ID storage is not configured.' }
+  if (!govIdTypes.has(file.type)) return { ok: false as const, status: 422, message: 'Government ID image must be a JPG or PNG file.' }
+  if (file.size > 5 * 1024 * 1024) return { ok: false as const, status: 422, message: 'Government ID image must be 5 MB or smaller.' }
+  const ext = file.type === 'image/png' ? 'png' : 'jpg'
+  const path = `gov_ids/${crypto.randomUUID()}.${ext}`
+  await bucket.put(path, file.stream(), { httpMetadata: { contentType: file.type } })
+  return { ok: true as const, path }
+}
+
 const forgotPasswordSchema = z.object({
   email: z.string().email(),
 })
@@ -111,6 +141,66 @@ async function sendPasswordResetEmail(
 function genericForgotPasswordResponse(c: AuthContext, extra: Record<string, unknown> = {}) {
   return successResponse(c, extra, 'If that email exists, a password reset link has been sent.')
 }
+
+authRoutes.post('/register', async (c) => {
+  const supabase = getSupabase(c.env)
+  if (!supabase) return errorResponse(c, 'Supabase credentials are not configured.', {}, 503)
+
+  const formData = await c.req.formData().catch(() => null)
+  if (!formData) return errorResponse(c, 'Validation failed.', { gov_id_image: ['Government ID image is required.'] })
+
+  const parsed = registerSchema.safeParse({
+    full_name: formValue(formData, 'full_name'),
+    email: formValue(formData, 'email'),
+    password: formValue(formData, 'password'),
+    password_confirmation: formValue(formData, 'password_confirmation'),
+    phone: formValue(formData, 'phone'),
+    address: formValue(formData, 'address'),
+    barangay: formValue(formData, 'barangay'),
+  })
+
+  if (!parsed.success) {
+    return errorResponse(c, 'Validation failed.', parsed.error.flatten().fieldErrors)
+  }
+
+  const govIdImage = formData.get('gov_id_image')
+  if (!(govIdImage instanceof File)) {
+    return errorResponse(c, 'Validation failed.', { gov_id_image: ['Government ID image is required.'] })
+  }
+
+  const email = parsed.data.email.trim().toLowerCase()
+  if (await findUserByEmail(supabase, email)) {
+    return errorResponse(c, 'Validation failed.', { email: ['The email has already been taken.'] })
+  }
+
+  const storedGovId = await storeGovIdImage(c, govIdImage)
+  if (!storedGovId.ok) {
+    return errorResponse(c, storedGovId.message, { gov_id_image: [storedGovId.message] }, storedGovId.status)
+  }
+
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      id: crypto.randomUUID(),
+      full_name: parsed.data.full_name.trim(),
+      email,
+      password: await hash(parsed.data.password, 10),
+      phone: parsed.data.phone.trim(),
+      address: parsed.data.address.trim(),
+      barangay: parsed.data.barangay.trim(),
+      role: 'citizen',
+      status: 'pending',
+      gov_id_image_path: storedGovId.path,
+      created_at: now,
+      updated_at: now,
+    })
+    .select('id')
+    .single()
+
+  if (error) throw error
+  return successResponse(c, { id: data.id }, 'Registration submitted. Awaiting admin approval.', 201)
+})
 
 authRoutes.post('/login', async (c) => {
   const supabase = getSupabase(c.env)

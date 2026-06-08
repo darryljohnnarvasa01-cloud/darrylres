@@ -18,7 +18,11 @@ CORS_ALLOWED_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://local
 name = "EMAIL"
 remote = true
 
-# Uncomment after creating an R2 bucket for incident media.
+# Uncomment after creating the required R2 buckets.
 # [[r2_buckets]]
 # binding = "INCIDENT_MEDIA_BUCKET"
 # bucket_name = "rescuelink-incident-media"
+#
+# [[r2_buckets]]
+# binding = "GOVERNMENT_ID_BUCKET"
+# bucket_name = "rescuelink-government-ids"
