@@ -336,4 +336,256 @@ adminRoutes.get('/incidents', async (c) => {
   }, 'Incidents retrieved successfully.')
 })
 
+adminRoutes.get('/incidents/triage-board', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+
+    const statusLimits: Record<string, number> = {
+      pending_verification: 50,
+      verified: 50,
+      under_assessment: 50,
+      responding: 50,
+      resolved: 30,
+    }
+
+    const { data: incidents, error } = await supabase
+      .from('incidents')
+      .select(`
+        id,
+        reference_code,
+        reporter_id,
+        is_guest,
+        type,
+        latitude,
+        longitude,
+        address_label,
+        status,
+        ai_risk_score,
+        created_at,
+        reporter:users(id,full_name,barangay),
+        latestAssignment:assignments(id,staff_id,staff:users(id,full_name,barangay,role,status))
+      `)
+      .in('status', Object.keys(statusLimits))
+      .order('created_at', { ascending: false })
+      .limit(500)
+
+    if (error) {
+      console.error('Triage board query error:', error)
+      return errorResponse(c, 'Failed to fetch triage board data', {}, 500)
+    }
+
+    const incidentsByStatus: Record<string, any[]> = {}
+    Object.keys(statusLimits).forEach((status) => {
+      incidentsByStatus[status] = []
+    })
+
+    incidents?.forEach((incident) => {
+      const status = incident.status
+      if (incidentsByStatus[status] && incidentsByStatus[status].length < statusLimits[status]) {
+        incidentsByStatus[status].push(incident)
+      }
+    })
+
+    const orderedIncidents = [
+      ...incidentsByStatus.pending_verification,
+      ...incidentsByStatus.verified,
+      ...incidentsByStatus.under_assessment,
+      ...incidentsByStatus.responding,
+      ...incidentsByStatus.resolved,
+    ]
+
+    return successResponse(c, {
+      incidents: {
+        data: orderedIncidents.map((incident) => ({
+          id: incident.id,
+          reference_code: incident.reference_code,
+          type: incident.type,
+          status: incident.status,
+          is_guest: incident.is_guest,
+          latitude: Number(incident.latitude),
+          longitude: Number(incident.longitude),
+          address_label: incident.address_label,
+          barangay: extractBarangay(incident.address_label),
+          ai_risk_score: Number(incident.ai_risk_score ?? 0),
+          created_at: incident.created_at,
+          reporter: incident.reporter ? {
+            id: incident.reporter.id,
+            full_name: incident.reporter.full_name,
+            barangay: incident.reporter.barangay,
+          } : null,
+          latestAssignment: incident.latestAssignment,
+        })),
+      },
+    }, 'Triage board incidents retrieved successfully.')
+  } catch (err) {
+    console.error('Triage board error:', err)
+    return errorResponse(c, 'Failed to fetch triage board', {}, 500)
+  }
+})
+
+adminRoutes.get('/hazard-zones', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const includeInactive = c.req.query('include_inactive') === 'true'
+
+    let query = supabase
+      .from('hazard_zones')
+      .select('*')
+      .order('type')
+      .order('name')
+
+    if (!includeInactive) {
+      query = query.eq('is_active', true)
+    }
+
+    const { data: zones, error } = await query
+
+    if (error) {
+      console.error('Hazard zones query error:', error)
+      return errorResponse(c, 'Failed to fetch hazard zones', {}, 500)
+    }
+
+    return successResponse(c, {
+      hazard_zones: (zones ?? []).map((zone) => ({
+        id: zone.id,
+        name: zone.name,
+        type: zone.type,
+        polygon: zone.polygon,
+        description: zone.description,
+        capacity: zone.capacity,
+        current_occupancy: zone.current_occupancy,
+        facilities: zone.facilities,
+        is_active: zone.is_active,
+        created_at: zone.created_at,
+      })),
+    }, 'Hazard zones retrieved successfully.')
+  } catch (err) {
+    console.error('Hazard zones error:', err)
+    return errorResponse(c, 'Failed to fetch hazard zones', {}, 500)
+  }
+})
+
+adminRoutes.post('/hazard-zones', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const body = await c.req.json()
+
+    const { data: zone, error } = await supabase
+      .from('hazard_zones')
+      .insert({
+        name: body.name,
+        type: body.type,
+        polygon: body.polygon,
+        description: body.description,
+        capacity: body.capacity,
+        current_occupancy: body.current_occupancy ?? 0,
+        facilities: body.facilities ?? [],
+        is_active: body.is_active !== false,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Hazard zone creation error:', error)
+      return errorResponse(c, 'Failed to create hazard zone', {}, 500)
+    }
+
+    return successResponse(c, {
+      hazard_zone: {
+        id: zone.id,
+        name: zone.name,
+        type: zone.type,
+        polygon: zone.polygon,
+        description: zone.description,
+        capacity: zone.capacity,
+        current_occupancy: zone.current_occupancy,
+        facilities: zone.facilities,
+        is_active: zone.is_active,
+        created_at: zone.created_at,
+      },
+    }, 'Hazard zone created successfully.', 201)
+  } catch (err) {
+    console.error('Hazard zone creation error:', err)
+    return errorResponse(c, 'Failed to create hazard zone', {}, 500)
+  }
+})
+
+adminRoutes.patch('/hazard-zones/:id', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const zoneId = c.req.param('id')
+    const body = await c.req.json()
+
+    const updateData: Record<string, any> = {}
+
+    if (body.name !== undefined) updateData.name = body.name
+    if (body.type !== undefined) updateData.type = body.type
+    if (body.polygon !== undefined) updateData.polygon = body.polygon
+    if (body.description !== undefined) updateData.description = body.description
+    if (body.capacity !== undefined) updateData.capacity = body.capacity
+    if (body.current_occupancy !== undefined) updateData.current_occupancy = body.current_occupancy
+    if (body.facilities !== undefined) updateData.facilities = body.facilities
+    if (body.is_active !== undefined) updateData.is_active = body.is_active
+
+    const { data: zone, error } = await supabase
+      .from('hazard_zones')
+      .update(updateData)
+      .eq('id', zoneId)
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Hazard zone update error:', error)
+      return errorResponse(c, 'Failed to update hazard zone', {}, 500)
+    }
+
+    return successResponse(c, {
+      hazard_zone: {
+        id: zone.id,
+        name: zone.name,
+        type: zone.type,
+        polygon: zone.polygon,
+        description: zone.description,
+        capacity: zone.capacity,
+        current_occupancy: zone.current_occupancy,
+        facilities: zone.facilities,
+        is_active: zone.is_active,
+        created_at: zone.created_at,
+      },
+    }, 'Hazard zone updated successfully.')
+  } catch (err) {
+    console.error('Hazard zone update error:', err)
+    return errorResponse(c, 'Failed to update hazard zone', {}, 500)
+  }
+})
+
+adminRoutes.delete('/hazard-zones/:id', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const zoneId = c.req.param('id')
+
+    const { error } = await supabase
+      .from('hazard_zones')
+      .delete()
+      .eq('id', zoneId)
+
+    if (error) {
+      console.error('Hazard zone deletion error:', error)
+      return errorResponse(c, 'Failed to delete hazard zone', {}, 500)
+    }
+
+    return successResponse(c, {
+      deleted: true,
+    }, 'Hazard zone deleted successfully.')
+  } catch (err) {
+    console.error('Hazard zone deletion error:', err)
+    return errorResponse(c, 'Failed to delete hazard zone', {}, 500)
+  }
+})
+
 export default adminRoutes
