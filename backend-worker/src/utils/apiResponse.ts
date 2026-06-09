@@ -26,11 +26,13 @@ export function errorResponse(
   message: string,
   errors: Record<string, unknown> = {},
   status: ContentfulStatusCode = 422,
+  data: Record<string, unknown> = {},
 ) {
   applyApiHeaders(c)
 
   return c.json({
     success: false,
+    data: data ?? {},
     errors,
     message,
   }, status)

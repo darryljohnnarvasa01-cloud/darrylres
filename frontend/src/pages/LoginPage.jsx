@@ -78,7 +78,14 @@ function LoginPage() {
           || parsed.message.toLowerCase().includes('email is not verified'))
 
       setShowResendVerification(emailNotVerified)
-      toast.error(parsed.message)
+
+      if (emailNotVerified && typeof parsed.data?.verification_url === 'string' && parsed.data.verification_url) {
+        setVerificationUrl(parsed.data.verification_url)
+        setStatusTone('info')
+        toast.error('Open the verification link below, then sign in again.')
+      } else {
+        toast.error(parsed.message)
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -203,14 +210,19 @@ function LoginPage() {
           </button>
 
           {showResendVerification && (
-            <button
-              type="button"
-              onClick={handleResendVerification}
-              disabled={isResending || isSubmitting}
-              className="w-full rounded-xl border border-info/30 bg-white px-4 py-3 text-sm font-semibold text-info transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {isResending ? 'Sending verification email...' : 'Resend verification email'}
-            </button>
+            <>
+              <p className="text-center text-xs text-slate-500">
+                No email inbox needed in free mode — use the blue verification link above, or generate a new one below.
+              </p>
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={isResending || isSubmitting}
+                className="w-full rounded-xl border border-info/30 bg-white px-4 py-3 text-sm font-semibold text-info transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isResending ? 'Generating new link...' : 'Generate new verification link'}
+              </button>
+            </>
           )}
         </form>
 

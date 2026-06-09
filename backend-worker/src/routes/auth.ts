@@ -10,7 +10,7 @@ import {
   serializeUser,
   verifyPassword,
 } from '../services/auth'
-import { authLinkExtras, emailDeliveryStatus, logEmailDeliverySkipped } from '../services/emailDelivery'
+import { authLinkExtras, emailDeliveryStatus, logEmailDeliverySkipped, shouldExposeAuthLinks } from '../services/emailDelivery'
 import { sendTransactionalEmail } from '../services/sendTransactionalEmail'
 import { getSupabase } from '../services/supabase'
 import type { AppEnv } from '../types'
@@ -336,9 +336,27 @@ authRoutes.post('/login', async (c) => {
   }
 
   if (user.role === 'citizen' && !user.email_verified_at) {
-    return errorResponse(c, 'Email is not verified. Request a new verification email to continue.', {
-      email: ['Email is not verified.'],
-    }, 403)
+    let verificationUrl: string | null = null
+
+    try {
+      const token = await createEmailVerificationToken(c.env, user.email)
+      verificationUrl = buildVerificationUrl(c, token)
+    } catch (verificationError) {
+      console.error('Failed to create verification token during login.', verificationError)
+    }
+
+    return errorResponse(
+      c,
+      shouldExposeAuthLinks(c.env)
+        ? 'Email is not verified. Open the verification link below, then sign in again.'
+        : 'Email is not verified. Request a new verification email to continue.',
+      { email: ['Email is not verified.'] },
+      403,
+      {
+        email_not_verified: true,
+        ...authLinkExtras(c.env, 'verification_url', verificationUrl, false),
+      },
+    )
   }
 
   if (user.role === 'citizen' && user.status === 'pending') {
@@ -353,7 +371,7 @@ authRoutes.post('/login', async (c) => {
     return errorResponse(c, `Account is blocked: ${user.blocked_reason || 'No reason provided.'}`, {}, 403)
   }
 
-  if (user.role === 'citizen' && !user.phone_verified_at) {
+  if (user.role === 'citizen' && !user.phone_verified_at && !shouldExposeAuthLinks(c.env)) {
     return errorResponse(c, 'Phone number is not verified. Request an SMS OTP to continue.', {
       phone: ['Phone number is not verified.'],
     }, 403)
@@ -413,15 +431,18 @@ authRoutes.post('/resend-verification-email', async (c) => {
   const extra: Record<string, unknown> = {}
   if (!user || user.deleted_at || user.email_verified_at) return genericVerificationResponse(c, extra)
 
+  let verificationUrl: string | null = null
+
   try {
     const token = await createEmailVerificationToken(c.env, email)
-    const verificationUrl = buildVerificationUrl(c, token)
+    verificationUrl = buildVerificationUrl(c, token)
     const emailSent = await sendVerificationEmail(c.env, email, verificationUrl)
     extra.email_sent = emailSent
     Object.assign(extra, authLinkExtras(c.env, 'verification_url', verificationUrl, emailSent))
   } catch (sendError) {
     console.error('Failed to send verification email', sendError)
     extra.email_sent = false
+    Object.assign(extra, authLinkExtras(c.env, 'verification_url', verificationUrl, false))
   }
 
   return genericVerificationResponse(c, extra)

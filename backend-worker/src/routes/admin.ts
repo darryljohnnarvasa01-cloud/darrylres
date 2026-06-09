@@ -951,7 +951,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()
@@ -1040,7 +1040,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()
@@ -1129,7 +1129,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()
@@ -1218,7 +1218,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()
@@ -1307,7 +1307,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()
@@ -1396,7 +1396,7 @@ adminRoutes.patch('/registrations/:id/approve', async (c) => {
     const now = new Date().toISOString()
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .update({ status: 'verified', rejection_reason: null, email_verified_at: user.email_verified_at || now, updated_at: now })
       .eq('id', registrationId)
       .select('*')
       .single()

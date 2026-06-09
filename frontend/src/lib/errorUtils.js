@@ -53,6 +53,7 @@ export function parseApiError(error) {
   return {
     message: payload?.message ?? fallbackMessageFor(error),
     fields: normalizedFields,
+    data: payload?.data ?? {},
     status: error?.response?.status ?? 500,
     diagnostics: getApiErrorDiagnostics(error),
   }
