@@ -70,11 +70,6 @@ function RegisterPage() {
       return
     }
 
-    if (!govIdFile) {
-      setErrors((prev) => ({ ...prev, gov_id_image: 'Government ID image is required.' }))
-      return
-    }
-
     setIsSubmitting(true)
     setErrors({})
 
@@ -83,18 +78,28 @@ function RegisterPage() {
     Object.entries(form).forEach(([key, value]) => {
       payload.append(key, value)
     })
-    payload.append('gov_id_image', govIdFile)
+    if (govIdFile) {
+      payload.append('gov_id_image', govIdFile)
+    }
 
     try {
       await ensureCsrfCookie()
-      await api.post('/api/v1/auth/register', payload, {
+      const response = await api.post('/api/v1/auth/register', payload, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       })
-      toast.success('Registration submitted! Wait for admin approval.')
+      const payload = response.data?.data ?? {}
+      const message =
+        response.data?.message
+        ?? 'Registration submitted. Check your email to verify your account and await admin approval.'
+
+      toast.success(message)
       navigate('/login', {
         state: {
+          email: form.email,
+          emailVerificationPending: true,
+          verificationUrl: typeof payload.verification_url === 'string' ? payload.verification_url : '',
           fromGuestReporting: isGuestTransition,
           fromGuestRegistration: isGuestTransition,
           returnTo,
@@ -221,7 +226,7 @@ function RegisterPage() {
           </div>
 
           <div>
-            <label className="mb-2 block text-sm font-medium">Government ID</label>
+            <label className="mb-2 block text-sm font-medium">Government ID (Optional)</label>
             <div
               className="rounded-xl border-2 border-dashed border-danger/40 bg-danger/5 p-4"
               onDrop={onDrop}
@@ -231,7 +236,7 @@ function RegisterPage() {
                 <label className="flex cursor-pointer flex-col items-center gap-2 text-center">
                   <UploadCloud className="h-8 w-8 text-danger" />
                   <p className="text-sm text-navy">Drag and drop your ID or click to upload</p>
-                  <p className="text-xs text-slate-500">JPEG / PNG up to 5MB</p>
+                  <p className="text-xs text-slate-500">Optional for now. JPEG / PNG up to 5MB</p>
                   <input
                     type="file"
                     accept=".jpg,.jpeg,.png"

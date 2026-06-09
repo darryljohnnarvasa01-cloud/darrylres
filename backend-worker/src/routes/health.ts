@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { emailDeliveryStatus } from '../services/emailDelivery'
 import { getSupabase } from '../services/supabase'
 import type { AppEnv } from '../types'
 import { successResponse } from '../utils/apiResponse'
@@ -59,6 +60,7 @@ healthRoutes.get('/', async (c) => {
         path: null,
         error: null,
       },
+      email: emailDeliveryStatus(c.env),
     },
   }, 'System health retrieved successfully.')
 })

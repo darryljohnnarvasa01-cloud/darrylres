@@ -5,6 +5,8 @@ import authRoutes from './routes/auth'
 import healthRoutes from './routes/health'
 import notificationRoutes from './routes/notifications'
 import publicRoutes, { guestIncidentQuota, storeGuestIncident } from './routes/public'
+// Import staff routes - ensure ./routes/staff.ts exists and exports a valid Hono route
+import staffRoutes from './routes/staff'
 import type { AppEnv } from './types'
 import { errorResponse, successResponse } from './utils/apiResponse'
 
@@ -21,6 +23,7 @@ app.get('/sanctum/csrf-cookie', (c) => successResponse(c, {}, 'CSRF cookie is no
 app.route('/api/v1/health', healthRoutes)
 app.route('/api/v1/auth', authRoutes)
 app.route('/api/v1/admin', adminRoutes)
+app.route('/api/v1/staff', staffRoutes)
 app.route('/api/v1/notifications', notificationRoutes)
 app.route('/api/v1/public', publicRoutes)
 app.get('/api/v1/incidents/guest/quota', guestIncidentQuota)
@@ -32,7 +35,15 @@ app.post('/api/v1/incidents/guest/claim', (c) => successResponse(c, {
 app.notFound((c) => errorResponse(c, 'Route not found.', {}, 404))
 
 app.onError((error, c) => {
-  console.error(error)
+  console.error('Unhandled worker error.', {
+    method: c.req.method,
+    url: c.req.url,
+    message: error instanceof Error ? error.message : String(error),
+  })
+
+  if (error instanceof Error && error.name === 'AbortError') {
+    return errorResponse(c, 'Upstream request timed out.', {}, 504)
+  }
 
   return errorResponse(c, 'Internal server error.', {}, 500)
 })

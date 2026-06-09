@@ -60,6 +60,8 @@ function severityForIncident(incident: Record<string, any>) {
 }
 
 function serializeIncidentSummary(incident: Record<string, any>) {
+  const reporter = incident.users ?? null
+
   return {
     id: incident.id,
     reference_code: incident.reference_code,
@@ -80,16 +82,76 @@ function serializeIncidentSummary(incident: Record<string, any>) {
     created_at: incident.created_at,
     resolved_at: incident.resolved_at,
     reporter: incident.reporter_id ? {
-      id: incident.reporter_id,
-      full_name: incident.reporter_name ?? null,
-      email: incident.reporter_email ?? null,
-      phone: incident.reporter_phone ?? null,
-      barangay: incident.reporter_barangay ?? null,
+      id: reporter?.id ?? incident.reporter_id,
+      full_name: reporter?.full_name ?? incident.reporter_name ?? null,
+      email: reporter?.email ?? incident.reporter_email ?? null,
+      phone: reporter?.phone ?? incident.reporter_phone ?? null,
+      barangay: reporter?.barangay ?? incident.reporter_barangay ?? null,
     } : null,
     assigned_responder: incident.assigned_responder ?? null,
     latestAssignment: null,
     assignments: [],
   }
+}
+
+function serializeRegistration(user: Record<string, any>) {
+  return {
+    id: user.id,
+    full_name: user.full_name,
+    email: user.email,
+    phone: user.phone,
+    address: user.address,
+    barangay: user.barangay,
+    role: user.role,
+    status: user.status,
+    rejection_reason: user.rejection_reason,
+    submitted_at: user.created_at,
+    gov_id_url: null,
+    email_verified_at: user.email_verified_at ?? null,
+    phone_verified_at: user.phone_verified_at ?? null,
+  }
+}
+
+function serializeResponderLocation(location: Record<string, any>) {
+  const responderId = location.user_id ?? location.responder_id ?? location.responder?.id ?? null
+
+  return {
+    id: location.id ?? responderId,
+    user_id: responderId,
+    responder_id: responderId,
+    action_status: location.action_status ?? 'accepted_request',
+    latitude: Number(location.latitude),
+    longitude: Number(location.longitude),
+    accuracy: location.accuracy ?? null,
+    heading: location.heading ?? null,
+    recorded_at: location.recorded_at ?? location.updated_at ?? null,
+    updated_at: location.updated_at ?? null,
+    responder: location.responder
+      ? {
+          id: location.responder.id ?? responderId,
+          full_name: location.responder.full_name ?? 'Unknown',
+          barangay: location.responder.barangay ?? 'Unknown',
+        }
+      : {
+          id: responderId,
+          full_name: location.full_name ?? 'Unknown',
+          barangay: location.barangay ?? 'Unknown',
+        },
+    incident: location.incident
+      ? {
+          id: location.incident.id,
+          reference_code: location.incident.reference_code ?? null,
+          latitude: location.incident.latitude == null ? null : Number(location.incident.latitude),
+          longitude: location.incident.longitude == null ? null : Number(location.incident.longitude),
+          address_label: location.incident.address_label ?? null,
+          status: location.incident.status ?? null,
+        }
+      : null,
+  }
+}
+
+async function registrationActionPayload(c: any) {
+  return c.req.json().catch(() => ({} as Record<string, unknown>))
 }
 
 async function countRows(
@@ -474,6 +536,36 @@ adminRoutes.get('/incidents/triage-board', async (c) => {
   }
 })
 
+adminRoutes.get('/incidents/:id', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const { data: incident, error } = await auth.supabase
+      .from('incidents')
+      .select(`
+        *,
+        users!reporter_id(id,full_name,email,phone,barangay)
+      `)
+      .eq('id', c.req.param('id'))
+      .maybeSingle()
+
+    if (error) {
+      console.error('Incident detail query error:', error)
+      return errorResponse(c, 'Failed to fetch incident', {}, 500)
+    }
+
+    if (!incident) {
+      return errorResponse(c, 'Incident not found.', {}, 404)
+    }
+
+    return successResponse(c, {
+      incident: serializeIncidentSummary(incident),
+    }, 'Incident retrieved successfully.')
+  } catch (err) {
+    console.error('Incident detail error:', err)
+    return errorResponse(c, 'Failed to fetch incident', {}, 500)
+  }
+})
+
 adminRoutes.get('/hazard-zones', async (c) => {
   try {
     const auth = c.get('auth')
@@ -693,7 +785,21 @@ adminRoutes.get('/responders/locations', async (c) => {
 
     const { data: responders, error } = await supabase
       .from('responder_locations')
-      .select('user_id,latitude,longitude,updated_at,users(id,full_name,barangay)')
+      .select(`
+        id,
+        user_id,
+        incident_id,
+        action_status,
+        latitude,
+        longitude,
+        accuracy,
+        heading,
+        recorded_at,
+        updated_at,
+        responder:users!user_id(id,full_name,barangay),
+        incident:incidents!incident_id(id,reference_code,latitude,longitude,address_label,status)
+      `)
+      .order('recorded_at', { ascending: false })
       .order('updated_at', { ascending: false })
       .limit(100)
 
@@ -701,30 +807,84 @@ adminRoutes.get('/responders/locations', async (c) => {
       if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
         // Table doesn't exist, return empty list
         return successResponse(c, {
+          locations: [],
           responders: [],
         }, 'Responder locations retrieved successfully.')
       }
       console.error('Responder locations query error:', error)
       return successResponse(c, {
+        locations: [],
         responders: [],
       }, 'Responder locations retrieved successfully.')
     }
 
+    const locations = (responders ?? []).map((loc: any) => serializeResponderLocation(loc))
+
     return successResponse(c, {
-      responders: (responders ?? []).map((loc: any) => ({
-        user_id: loc.user_id,
-        full_name: loc.users?.full_name ?? 'Unknown',
-        barangay: loc.users?.barangay ?? 'Unknown',
-        latitude: Number(loc.latitude),
-        longitude: Number(loc.longitude),
-        updated_at: loc.updated_at,
-      })),
+      locations,
+      responders: locations,
     }, 'Responder locations retrieved successfully.')
   } catch (err) {
     console.error('Responder locations error:', err)
     return successResponse(c, {
+      locations: [],
       responders: [],
     }, 'Responder locations retrieved successfully.')
+  }
+})
+
+adminRoutes.get('/responders/:id/routes', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const responderId = c.req.param('id')
+    const incidentId = c.req.query('incident_id')?.trim()
+
+    if (!incidentId) {
+      return errorResponse(c, 'Incident id is required.', {
+        incident_id: ['Provide an incident_id query parameter.'],
+      }, 422)
+    }
+
+    const { data, error } = await auth.supabase
+      .from('responder_status_logs')
+      .select('id,user_id,incident_id,action_status,latitude,longitude,created_at,updated_at,notes,metadata')
+      .eq('user_id', responderId)
+      .eq('incident_id', incidentId)
+      .order('created_at', { ascending: true })
+      .limit(500)
+
+    if (error) {
+      if (error.code === 'PGRST116' || error.message?.includes('does not exist')) {
+        return successResponse(c, {
+          points: [],
+        }, 'Responder route points retrieved successfully.')
+      }
+
+      throw error
+    }
+
+    const points = (data ?? [])
+      .filter((row: any) => row.latitude != null && row.longitude != null)
+      .map((row: any) => ({
+        id: row.id,
+        user_id: row.user_id ?? responderId,
+        responder_id: row.user_id ?? responderId,
+        incident_id: row.incident_id,
+        action_status: row.action_status ?? 'accepted_request',
+        latitude: Number(row.latitude),
+        longitude: Number(row.longitude),
+        heading: row.metadata?.heading ?? null,
+        accuracy: row.metadata?.accuracy ?? null,
+        recorded_at: row.created_at ?? row.updated_at ?? null,
+        notes: row.notes ?? null,
+      }))
+
+    return successResponse(c, {
+      points,
+    }, 'Responder route points retrieved successfully.')
+  } catch (error) {
+    console.error('Responder route points error:', error)
+    return errorResponse(c, 'Failed to fetch responder route points.', {}, 500)
   }
 })
 
@@ -750,19 +910,7 @@ adminRoutes.get('/registrations', async (c) => {
       return errorResponse(c, 'Failed to fetch registrations', {}, 500)
     }
 
-    const registrationsList = (registrations ?? []).map((user: any) => ({
-      id: user.id,
-      full_name: user.full_name,
-      email: user.email,
-      phone: user.phone,
-      address: user.address,
-      barangay: user.barangay,
-      role: user.role,
-      status: user.status,
-      rejection_reason: user.rejection_reason,
-      submitted_at: user.created_at,
-      gov_id_url: null,
-    }))
+    const registrationsList = (registrations ?? []).map((user: any) => serializeRegistration(user))
 
     return successResponse(c, {
       registrations: {
@@ -776,6 +924,540 @@ adminRoutes.get('/registrations', async (c) => {
   } catch (err) {
     console.error('Registrations error:', err)
     return errorResponse(c, 'Failed to fetch registrations', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/approve', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration approve lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'verified', rejection_reason: null, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration approve error:', error)
+      return errorResponse(c, 'Failed to approve registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration approved successfully.')
+  } catch (err) {
+    console.error('Registration approve error:', err)
+    return errorResponse(c, 'Failed to approve registration', {}, 500)
+  }
+})
+
+adminRoutes.patch('/registrations/:id/reject', async (c) => {
+  try {
+    const auth = c.get('auth')
+    const supabase = auth.supabase
+    const registrationId = c.req.param('id')
+    const body = await registrationActionPayload(c)
+    const rejectionReason = typeof body.reason === 'string' ? body.reason.trim() : typeof body.rejection_reason === 'string' ? body.rejection_reason.trim() : ''
+
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', registrationId)
+      .eq('role', 'citizen')
+      .maybeSingle()
+
+    if (userError) {
+      console.error('Registration reject lookup error:', userError)
+      return errorResponse(c, 'Failed to load registration', {}, 500)
+    }
+
+    if (!user) {
+      return errorResponse(c, 'Registration not found.', {}, 404)
+    }
+
+    if (!rejectionReason) {
+      return errorResponse(c, 'Validation failed.', { rejection_reason: ['Rejection reason is required.'] }, 422)
+    }
+
+    const now = new Date().toISOString()
+    const { data: updatedUser, error } = await supabase
+      .from('users')
+      .update({ status: 'rejected', rejection_reason: rejectionReason, updated_at: now })
+      .eq('id', registrationId)
+      .select('*')
+      .single()
+
+    if (error) {
+      console.error('Registration reject error:', error)
+      return errorResponse(c, 'Failed to reject registration', {}, 500)
+    }
+
+    return successResponse(c, { registration: serializeRegistration(updatedUser) }, 'Registration rejected successfully.')
+  } catch (err) {
+    console.error('Registration reject error:', err)
+    return errorResponse(c, 'Failed to reject registration', {}, 500)
   }
 })
 

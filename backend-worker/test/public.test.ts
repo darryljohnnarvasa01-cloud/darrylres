@@ -13,7 +13,7 @@ const env: Bindings = {
 describe('Worker API smoke routes', () => {
   it('returns the public config envelope', async () => {
     const response = await app.request('/api/v1/public/config', {}, env)
-    const body = await response.json()
+    const body: any = await response.json()
 
     expect(response.status).toBe(200)
     expect(body).toEqual({
@@ -33,7 +33,7 @@ describe('Worker API smoke routes', () => {
 
   it('returns a not-found envelope for unknown routes', async () => {
     const response = await app.request('/missing', {}, env)
-    const body = await response.json()
+    const body: any = await response.json()
 
     expect(response.status).toBe(404)
     expect(body.success).toBe(false)
@@ -57,7 +57,7 @@ describe('Worker API smoke routes', () => {
       APP_NAME: 'RescueLink',
       APP_ENV: 'test',
     })
-    const body = await response.json()
+    const body: any = await response.json()
 
     expect(response.status).toBe(503)
     expect(body.success).toBe(false)
@@ -78,7 +78,7 @@ describe('Worker API smoke routes', () => {
       method: 'POST',
       body: formData,
     }, env)
-    const body = await response.json()
+    const body: any = await response.json()
 
     expect(response.status).toBe(422)
     expect(body.success).toBe(false)
@@ -90,7 +90,7 @@ describe('Worker API smoke routes', () => {
       APP_NAME: 'RescueLink',
       APP_ENV: 'test',
     })
-    const body = await response.json()
+    const body: any = await response.json()
 
     expect(response.status).toBe(503)
     expect(body.success).toBe(false)

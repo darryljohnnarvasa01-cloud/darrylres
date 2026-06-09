@@ -1,7 +1,8 @@
-import { ShieldAlert } from 'lucide-react'
+import { MailCheck, ShieldAlert } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import toast from 'react-hot-toast'
+import AuthLinkPanel from '../components/AuthLinkPanel'
 import BrandMark from '../components/BrandMark'
 import { useAuth } from '../context/AuthContext'
 import { api, ensureCsrfCookie } from '../lib/api'
@@ -15,9 +16,23 @@ function LoginPage() {
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState({})
   const [statusMessage, setStatusMessage] = useState(
-    location.state?.passwordReset ? 'Password reset successfully. You can now sign in.' : '',
+    location.state?.passwordReset
+      ? 'Password reset successfully. You can now sign in.'
+      : location.state?.emailVerificationPending
+        ? location.state?.verificationUrl
+          ? 'Registration submitted. Use the verification link below, then sign in after admin approval.'
+          : 'Registration submitted. Check your email to verify your account, then sign in after admin approval.'
+        : '',
+  )
+  const [statusTone, setStatusTone] = useState(
+    location.state?.emailVerificationPending || location.state?.passwordReset ? 'info' : 'danger',
+  )
+  const [showResendVerification, setShowResendVerification] = useState(false)
+  const [verificationUrl, setVerificationUrl] = useState(
+    typeof location.state?.verificationUrl === 'string' ? location.state.verificationUrl : '',
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isResending, setIsResending] = useState(false)
   const { login } = useAuth()
   const isGuestTransition = Boolean(location.state?.fromGuestReporting || location.state?.fromGuestLimit)
   const returnTo =
@@ -29,6 +44,8 @@ function LoginPage() {
     event.preventDefault()
     setErrors({})
     setStatusMessage('')
+    setStatusTone('danger')
+    setShowResendVerification(false)
     setIsSubmitting(true)
 
     try {
@@ -53,9 +70,56 @@ function LoginPage() {
       const parsed = parseApiError(error)
       setErrors(parsed.fields)
       setStatusMessage(parsed.message)
+      setStatusTone('danger')
+
+      const emailNotVerified =
+        parsed.status === 403
+        && (parsed.fields.email === 'Email is not verified.'
+          || parsed.message.toLowerCase().includes('email is not verified'))
+
+      setShowResendVerification(emailNotVerified)
       toast.error(parsed.message)
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    if (!email.trim()) {
+      setErrors((prev) => ({ ...prev, email: 'Enter a valid email address.' }))
+      return
+    }
+
+    setErrors({})
+    setStatusMessage('')
+    setStatusTone('info')
+    setIsResending(true)
+
+    try {
+      await ensureCsrfCookie()
+      const response = await api.post('/api/v1/auth/resend-verification-email', { email })
+      const payload = response.data?.data ?? {}
+      const message =
+        response.data?.message
+        ?? 'If that account exists and is not yet verified, a verification email has been sent.'
+
+      setStatusMessage(message)
+      setStatusTone('info')
+
+      if (payload.auth_link_on_screen && payload.verification_url) {
+        setVerificationUrl(payload.verification_url)
+        toast.success('Use the email verification link below.')
+      } else {
+        toast.success(message)
+      }
+    } catch (error) {
+      const parsed = parseApiError(error)
+      setErrors(parsed.fields)
+      setStatusMessage(parsed.message)
+      setStatusTone('danger')
+      toast.error(parsed.message)
+    } finally {
+      setIsResending(false)
     }
   }
 
@@ -72,9 +136,25 @@ function LoginPage() {
           </div>
         )}
 
+        <AuthLinkPanel
+          title="Email verification link"
+          url={verificationUrl}
+          description="Open this link to verify your email before signing in."
+        />
+
         {statusMessage && (
-          <div className="mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+          <div
+            className={
+              statusTone === 'info'
+                ? 'mt-4 flex items-start gap-2 rounded-xl border border-info/20 bg-blue-50 px-3 py-2 text-sm text-slate-600'
+                : 'mt-4 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger'
+            }
+          >
+            {statusTone === 'info' ? (
+              <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+            ) : (
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+            )}
             <span>{statusMessage}</span>
           </div>
         )}
@@ -121,6 +201,17 @@ function LoginPage() {
           >
             {isSubmitting ? 'Signing in...' : 'Sign In'}
           </button>
+
+          {showResendVerification && (
+            <button
+              type="button"
+              onClick={handleResendVerification}
+              disabled={isResending || isSubmitting}
+              className="w-full rounded-xl border border-info/30 bg-white px-4 py-3 text-sm font-semibold text-info transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isResending ? 'Sending verification email...' : 'Resend verification email'}
+            </button>
+          )}
         </form>
 
         <p className="mt-4 text-center text-sm text-slate-500">

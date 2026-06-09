@@ -189,10 +189,18 @@ export async function resolveBearerToken(c: Context<AppEnv>) {
     return null
   }
 
-  await supabase
-    .from('personal_access_tokens')
-    .update({ last_used_at: new Date().toISOString() })
-    .eq('id', data.id)
+  const touchTokenPromise = (async () => {
+    try {
+      await supabase
+        .from('personal_access_tokens')
+        .update({ last_used_at: new Date().toISOString() })
+        .eq('id', data.id)
+    } catch (touchError) {
+      console.warn('Token last_used_at update failed.', touchError)
+    }
+  })()
+
+  c.executionCtx?.waitUntil(touchTokenPromise)
 
   return {
     supabase,

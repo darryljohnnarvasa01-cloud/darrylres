@@ -8,6 +8,7 @@ export type IncidentMediaBucket = {
       }
     },
   ) => Promise<unknown>
+  delete?: (key: string) => Promise<unknown>
 }
 
 export type SendEmailBinding = {
@@ -21,6 +22,8 @@ export type Bindings = {
   FRONTEND_URL?: string
   MAIL_FROM_ADDRESS?: string
   MAIL_FROM_NAME?: string
+  RESEND_API_KEY?: string
+  EXPOSE_AUTH_LINKS?: string
   PASSWORD_RESET_EXPIRES_MINUTES?: string
   GUEST_REPORT_LIMIT?: string
   CORS_ALLOWED_ORIGINS?: string
